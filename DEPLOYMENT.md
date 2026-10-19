@@ -8,7 +8,7 @@
 | Storefront Express API/admin server | `client_frontend/server.ts` | Long-running Node.js host with a persistent disk |
 | Optional Firebase/Firestore API | `client_backend/` | Separate Node.js service; it has a different API contract and is not a drop-in server for the storefront |
 
-The root [`netlify.toml`](./netlify.toml) builds the storefront from this repository's root and publishes its Vite `dist/` output. Netlify serves the static bundle only; it does not run either Express server as a permanent service.
+Netlify can serve the storefront's static Vite bundle; it does not run either Express server as a permanent service. Configure the build settings below in the Netlify site dashboard; this repository does not include a Netlify configuration file.
 
 ## Netlify storefront
 
@@ -21,7 +21,7 @@ The root [`netlify.toml`](./netlify.toml) builds the storefront from this reposi
 
 Firebase web configuration and a Firebase project ID are public client configuration, not authentication credentials. Firebase Authentication, Firestore rules, and server-side administrator authorization still need to be configured correctly. Do not put Firebase service-account JSON/private keys, Cloudinary API secrets/`CLOUDINARY_URL`, administrator passwords, or signing/HMAC secrets in Netlify or any `VITE_*` variable.
 
-Secrets scanning remains enabled. The narrow `SECRETS_SCAN_OMIT_KEYS` list in `netlify.toml` contains only verified non-secret configuration identifiers: normal runtime settings, the public Firebase project ID and web configuration, the public Cloudinary upload-preset identifier, and the public API URL. No paths or source directories are omitted. Do not set `SECRETS_SCAN_ENABLED=false`.
+Keep Netlify secrets scanning enabled. Do not set `SECRETS_SCAN_ENABLED=false` or omit paths or source directories from scanning.
 
 ## Express service
 
@@ -37,10 +37,10 @@ For Cloudinary uploads, configure `CLOUDINARY_URL` as a server-side credential. 
 
 ## Secrets-scanning findings
 
-The reported `LOG_LEVEL`, `NODE_ENV`, and `PORT` values are ordinary runtime configuration. `FIREBASE_PROJECT_ID` is a public identifier, not a password. `CLOUDINARY_UPLOAD_PRESET` is a public preset name; the optional Firebase backend signs uploads server-side. The Netlify omissions are limited to these verified false positives. The backend Git repository ignores its service-account JSON and `.env`. A populated local `.env` contains a Cloudinary credential URL and order-tracking HMAC secret; these were not found in tracked source or the generated bundle. Rotate those values and the service-account key if they have ever been committed, shared, or deployed to an untrusted location.
+The reported `LOG_LEVEL`, `NODE_ENV`, and `PORT` values are ordinary runtime configuration. `FIREBASE_PROJECT_ID` is a public identifier, not a password. `CLOUDINARY_UPLOAD_PRESET` is a public preset name; the optional Firebase backend signs uploads server-side. The backend Git repository ignores its service-account JSON and `.env`. A populated local `.env` contains a Cloudinary credential URL and order-tracking HMAC secret; these were not found in tracked source or the generated bundle. Rotate those values and the service-account key if they have ever been committed, shared, or deployed to an untrusted location.
 
 ## Release checks
 
 Configure the public client variables in Netlify and the private runtime variables in Vercel, then test `/health/ready`, Firebase sign-in/admin authorization, product image uploads, and persistent writes. No Netlify or Vercel deployment is performed by these repository changes.
 
-The current workspace has no Git root: `client_backend/` is a separate Git checkout, while the root Netlify config and `client_frontend/` are outside it. To have Netlify use this frontend build configuration, its connected Git repository must contain both `netlify.toml` and `client_frontend/`; the backend-only Git checkout cannot build that storefront.
+The current workspace has no Git root: `client_backend/` is a separate Git checkout, while `Client1_Frontend/` is outside it. To deploy the storefront from Git, connect a repository containing this frontend and configure the build settings in the Netlify site dashboard; the backend-only Git checkout cannot build that storefront.
