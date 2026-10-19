@@ -1,0 +1,13 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+data/uploads/
+# The datastore contains the administrator password hash and session secret.
+# Provision it on a persistent volume; never commit it.
+data/store.json
+data/store.backup.json

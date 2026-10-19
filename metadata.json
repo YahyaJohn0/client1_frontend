@@ -1,0 +1,6 @@
+{
+  "name": "ZAMZAM Essentials — Lifestyle, Beauty & Household Store",
+  "description": "Mobile-first lifestyle, beauty accessories, hair care tools, makeup organizers, and household essentials store with synchronized web admin dashboard and guest checkout.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
