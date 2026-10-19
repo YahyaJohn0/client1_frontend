@@ -13,7 +13,7 @@ import type {
 import { getFreshIdToken, getAdminIdToken } from './firebase.ts';
 
 /**
- * Trusted administrator identity returned by GET /api/admin/me. It is only a
+ * Trusted administrator identity returned by GET /api/v1/auth/admin/me. It is only a
  * description of what the backend has already authorized; it never grants
  * access by itself.
  */
@@ -29,9 +29,122 @@ export interface AdminIdentity {
   username?: string;
 }
 
+export interface OrderTrackingInfo {
+  orderNumber: string;
+  fulfillmentStatus: OrderStatus;
+  statusHistory: Array<{ status: OrderStatus; timestamp: string }>;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // Centralized API Configuration
 const STORAGE_CUSTOM_BASE_URL = 'zamzam_custom_api_base_url';
 const DEFAULT_API_BASE_URL = 'https://clientbackend2-qu4dpdu9.b4a.run';
+const API_PREFIX = '/api/v1';
+
+function apiPath(path: string): string {
+  return `${API_PREFIX}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
+function unwrapApiData<T>(response: any): T {
+  return response?.success === true && Object.hasOwn(response, 'data') ? response.data as T : response as T;
+}
+
+function normalizeProduct(raw: any): Product {
+  const images = Array.isArray(raw?.images) ? raw.images : [];
+  const imageMetadata = images
+    .filter((image: any) => image && typeof image === 'object' && typeof image.url === 'string')
+    .map((image: any, index: number) => ({
+      url: image.url,
+      publicId: image.publicId,
+      isPrimary: index === 0
+    }));
+  return {
+    ...raw,
+    images: images.map((image: any) => typeof image === 'string' ? image : image?.url).filter(Boolean),
+    imageMetadata,
+    salePrice: raw?.salePrice ?? undefined
+  } as Product;
+}
+
+function serializeProduct(input: Partial<Product>): Record<string, unknown> {
+  const payload: Record<string, unknown> = {};
+  for (const field of [
+    'name', 'sku', 'description', 'shortDescription', 'categoryId', 'price', 'salePrice',
+    'stock', 'isFeatured', 'isBestSeller', 'isTrending', 'isNewArrival', 'isActive'
+  ] as const) {
+    if (Object.hasOwn(input, field)) payload[field] = input[field];
+  }
+
+  if (Object.hasOwn(input, 'images')) {
+    const metadata = new Map((input.imageMetadata || []).map(image => [image.url, image]));
+    payload.images = (input.images || []).map(url => {
+      const image = metadata.get(url);
+      if (!image?.publicId) {
+        throw new ApiError(
+          'Upload each product image before saving; the API requires its Cloudinary public ID.',
+          400,
+          'IMAGE_PUBLIC_ID_REQUIRED'
+        );
+      }
+      return { url, publicId: image.publicId };
+    });
+  }
+  return payload;
+}
+
+function normalizeCategory(raw: any): Category {
+  return {
+    ...raw,
+    slug: raw?.slug || String(raw?.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+    image: raw?.image ?? undefined
+  } as Category;
+}
+
+function unsupportedBackendFeature(feature: string): never {
+  throw new ApiError(
+    `${feature} is not supported by the deployed client_backend API.`,
+    501,
+    'FEATURE_NOT_SUPPORTED'
+  );
+}
+
+function serializeCategory(input: Partial<Category>): Record<string, unknown> {
+  const payload: Record<string, unknown> = {};
+  for (const field of ['name', 'description', 'image', 'isActive', 'displayOrder'] as const) {
+    if (Object.hasOwn(input, field)) payload[field] = input[field];
+  }
+  return payload;
+}
+
+function normalizeOrder(raw: any, fallback?: any): Order {
+  const status = raw?.status || raw?.fulfillmentStatus || 'placed';
+  return {
+    ...fallback,
+    ...raw,
+    customer: {
+      ...fallback?.customer,
+      ...raw?.customer,
+      fullName: raw?.customer?.fullName || raw?.customer?.name || fallback?.customer?.fullName || '',
+      phone: raw?.customer?.phone || fallback?.customer?.phone || '',
+      address: raw?.customer?.address || fallback?.customer?.address || '',
+      city: raw?.customer?.city || fallback?.customer?.city || ''
+    },
+    items: (raw?.items || fallback?.items || []).map((item: any) => ({
+      ...item,
+      price: item.price ?? item.unitPrice ?? 0,
+      image: item.image || ''
+    })),
+    paymentMethod: 'COD',
+    paymentStatus: raw?.paymentStatus === 'unpaid' ? 'pending' : raw?.paymentStatus || 'pending',
+    fulfillmentStatus: status === 'pending' ? 'placed' : status,
+    statusHistory: (raw?.statusHistory || []).map((entry: any) => ({
+      ...entry,
+      status: entry.status === 'pending' ? 'placed' : entry.status,
+      timestamp: entry.timestamp || entry.at || ''
+    }))
+  } as Order;
+}
 
 /**
  * Normalizes a configured API base URL.
@@ -53,7 +166,7 @@ function normalizeBaseUrl(raw: string | null | undefined): string | null {
 }
 
 /**
- * Use the deployed Firebase backend unless a local-storage override or
+ * Use the deployed backend unless a local-storage override or
  * VITE_API_BASE_URL selects another API.
  */
 function readStoredBaseUrl(): string | null {
@@ -109,21 +222,6 @@ export class ApiError extends Error {
 // In-flight request deduplication map to prevent duplicate submissions
 const pendingRequests = new Map<string, Promise<any>>();
 
-/** Reads a browser File/Blob into a base64 data URI for upload proxying. */
-function readFileAsDataUrl(file: File | Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (typeof FileReader === 'undefined') {
-      reject(new ApiError('This browser cannot read the selected file.', 0, 'FILE_READER_UNAVAILABLE'));
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = () =>
-      reject(new ApiError('Could not read the selected image file.', 0, 'FILE_READ_ERROR', reader.error));
-    reader.readAsDataURL(file);
-  });
-}
-
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
   headers?: Record<string, string>;
@@ -132,9 +230,7 @@ interface RequestOptions {
   requiresAuth?: boolean;
   /**
    * Which credential to send on an authenticated request.
-   * - "admin": the administrator Firebase ID token (from the dedicated admin
-   *   app) and the `X-Zamzam-Admin` CSRF header. The httpOnly local-recovery
-   *   cookie is sent by the browser automatically.
+   * - "admin": the administrator Firebase ID token from the dedicated admin app.
    * - "customer": only the signed-in customer's Firebase ID token.
    * - "auto" (default): the customer token when present, otherwise the admin
    *   token (public endpoints do not require either).
@@ -196,17 +292,10 @@ async function httpRequest<T>(endpoint: string, options: RequestOptions = {}): P
     const isOurBackend = finalUrl.startsWith(baseUrl);
     const authMode = options.auth || 'auto';
     if (isOurBackend) {
-      if (authMode === 'admin') {
-        // CSRF defence for the httpOnly local-recovery cookie. Cross-origin
-        // callers cannot set this header without an approved CORS preflight.
-        headers['X-Zamzam-Admin'] = '1';
-      }
       const authToken = await resolveAuthToken(authMode);
       if (authToken) {
         headers['Authorization'] = `Bearer ${authToken}`;
-      } else if (options.requiresAuth && authMode !== 'admin') {
-        // Admin requests may be authenticated by the httpOnly cookie instead,
-        // so the server makes that decision rather than failing client-side.
+      } else if (options.requiresAuth) {
         throw new ApiError(
           authMode === 'customer'
             ? 'Please sign in to your customer account to continue.'
@@ -225,7 +314,7 @@ async function httpRequest<T>(endpoint: string, options: RequestOptions = {}): P
       res = await fetch(finalUrl, {
         method,
         headers,
-        credentials: 'same-origin',
+        credentials: 'omit',
         body: options.body instanceof FormData ? options.body : options.body ? JSON.stringify(options.body) : undefined,
         signal: controller.signal
       });
@@ -322,9 +411,10 @@ export const api = {
    * GET /health/live
    */
   checkLiveness: async (): Promise<{ status: string; uptime?: number; timestamp?: string }> => {
-    return httpRequest<{ status: string; uptime?: number; timestamp?: string }>('/health/live', {
+    const response = await httpRequest<any>('/health/live', {
       timeoutMs: 5000
     });
+    return unwrapApiData(response);
   },
 
   /**
@@ -332,9 +422,10 @@ export const api = {
    * GET /health/ready
    */
   checkReadiness: async (): Promise<{ status: string; database?: boolean; details?: any }> => {
-    return httpRequest<{ status: string; database?: boolean; details?: any }>('/health/ready', {
+    const response = await httpRequest<any>('/health/ready', {
       timeoutMs: 6000
     });
+    return unwrapApiData(response);
   },
 
   // -----------------------------------------------------------------------
@@ -343,7 +434,7 @@ export const api = {
 
   /**
    * List products with search, category, status, stock, sorting, pagination
-   * GET /api/v1/products (public) or GET /api/admin/products (includeInactive)
+   * GET /api/v1/products (includeInactive requires a Firebase administrator)
    */
   getProducts: async (params?: {
     category?: string;
@@ -357,96 +448,97 @@ export const api = {
     includeInactive?: boolean;
   }): Promise<{ products: Product[]; total?: number; page?: number; totalPages?: number }> => {
     const includeInactive = params?.includeInactive === true;
-    const raw = await httpRequest<any>(includeInactive ? '/api/admin/products' : '/api/v1/products', {
+    const response = await httpRequest<any>(apiPath('/products'), {
       method: 'GET',
-      params: includeInactive
-        ? undefined
-        : {
-            category: params?.category && params.category !== 'all' ? params.category : undefined,
-            categoryId: params?.category && params.category !== 'all' ? params.category : undefined,
-            search: params?.search,
-            sort: params?.sort,
-            isActive: params?.isActive,
-            status: params?.status,
-            stock: params?.stock,
-            page: params?.page,
-            limit: params?.limit
-          },
+      params: {
+        categoryId: params?.category && params.category !== 'all' ? params.category : undefined,
+        search: params?.search,
+        sort: ['name', 'price', 'createdAt', 'updatedAt'].includes(params?.sort || '') ? params?.sort : undefined,
+        order: 'desc',
+        stock: params?.stock,
+        limit: params?.limit || 100,
+        includeInactive: includeInactive ? true : undefined
+      },
       requiresAuth: includeInactive,
       auth: includeInactive ? 'admin' : 'auto'
     });
+    const raw = unwrapApiData<any>(response);
 
     // Handle standard { products: [...] } or direct array [...] or { data: [...] }
     const products: Product[] = Array.isArray(raw)
       ? raw
       : Array.isArray(raw?.products)
       ? raw.products
-      : Array.isArray(raw?.data)
-      ? raw.data
       : [];
+    const normalizedProducts = products.map(normalizeProduct);
 
     return {
-      products,
-      total: raw?.total ?? products.length,
-      page: raw?.page,
-      totalPages: raw?.totalPages
+      products: normalizedProducts,
+      total: normalizedProducts.length,
+      page: 1,
+      totalPages: 1
     };
   },
 
   /**
    * Get single product details (Admin authenticated so inactive products load)
-   * GET /api/admin/products/:id
+   * GET /api/v1/products/:id?includeInactive=true
    */
   getProduct: async (id: string): Promise<{ product: Product }> => {
-    const raw = await httpRequest<any>(`/api/admin/products/${encodeURIComponent(id)}`, {
+    const response = await httpRequest<any>(apiPath(`/products/${encodeURIComponent(id)}`), {
       method: 'GET',
+      params: { includeInactive: true },
       requiresAuth: true,
       auth: 'admin'
     });
+    const raw = unwrapApiData<any>(response);
     const product = raw?.product || raw?.data || raw;
-    return { product };
+    return { product: normalizeProduct(product) };
   },
 
   /**
    * Create new product (Admin authenticated)
-   * POST /api/admin/products
+   * POST /api/v1/products
    */
   createProduct: async (productPayload: Partial<Product>): Promise<{ product: Product }> => {
-    const raw = await httpRequest<any>('/api/admin/products', {
+    const response = await httpRequest<any>(apiPath('/products'), {
       method: 'POST',
-      body: productPayload,
+      body: serializeProduct(productPayload),
       requiresAuth: true,
       auth: 'admin'
     });
+    const raw = unwrapApiData<any>(response);
     const product = raw?.product || raw?.data || raw;
-    return { product };
+    return { product: normalizeProduct(product) };
   },
 
   /**
    * Update existing product (Admin authenticated)
-   * PUT /api/admin/products/:id
+   * PATCH /api/v1/products/:id
    */
   updateProduct: async (id: string, updates: Partial<Product>): Promise<{ product: Product }> => {
-    const raw = await httpRequest<any>(`/api/admin/products/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      body: updates,
+    const response = await httpRequest<any>(apiPath(`/products/${encodeURIComponent(id)}`), {
+      method: 'PATCH',
+      body: serializeProduct(updates),
       requiresAuth: true,
       auth: 'admin'
     });
+    const raw = unwrapApiData<any>(response);
     const product = raw?.product || raw?.data || raw;
-    return { product };
+    return { product: normalizeProduct(product) };
   },
 
   /**
    * Archive product (Admin authenticated). Archiving preserves order history.
-   * POST /api/admin/products/:id/archive
+   * DELETE /api/v1/products/:id (archives without destroying order history)
    */
   archiveProduct: async (id: string): Promise<{ success: boolean; product?: Product; message?: string }> => {
-    const raw = await httpRequest<any>(`/api/admin/products/${encodeURIComponent(id)}/archive`, {
-      method: 'POST',
+    const response = await httpRequest<any>(apiPath(`/products/${encodeURIComponent(id)}`), {
+      method: 'DELETE',
       requiresAuth: true,
       auth: 'admin'
     });
+    const raw = unwrapApiData<any>(response);
     return {
       success: raw?.success ?? true,
       product: raw?.product,
@@ -456,14 +548,14 @@ export const api = {
 
   /**
    * Permanently delete a product (Admin authenticated).
-   * DELETE /api/admin/products/:id — the API refuses when the product is
-   * referenced by historical orders and asks for archival instead.
+   * DELETE /api/v1/products/:id archives products, preserving order history.
    */
   deleteProduct: async (id: string, force = false): Promise<{ success: boolean; message?: string; requiresArchive?: boolean; orderCount?: number }> => {
-    const raw = await httpRequest<any>(
-      `/api/admin/products/${encodeURIComponent(id)}${force ? '?force=true' : ''}`,
+    const response = await httpRequest<any>(
+      apiPath(`/products/${encodeURIComponent(id)}`),
       { method: 'DELETE', requiresAuth: true, auth: 'admin' }
     );
+    const raw = unwrapApiData<any>(response);
     return {
       success: raw?.success ?? true,
       message: raw?.message,
@@ -474,18 +566,19 @@ export const api = {
 
   /**
    * Change product active status (Admin authenticated)
-   * PUT /api/admin/products/:id
+   * PATCH /api/v1/products/:id/status
    */
   updateProductStatus: async (
     id: string,
     isActive: boolean
   ): Promise<{ success: boolean; product?: Product }> => {
-    const raw = await httpRequest<any>(`/api/admin/products/${encodeURIComponent(id)}`, {
-      method: 'PUT',
+    const response = await httpRequest<any>(apiPath(`/products/${encodeURIComponent(id)}/status`), {
+      method: 'PATCH',
       body: { isActive },
       requiresAuth: true,
       auth: 'admin'
     });
+    const raw = unwrapApiData<any>(response);
     return {
       success: raw?.success ?? true,
       product: raw?.product || raw?.data
@@ -498,79 +591,81 @@ export const api = {
 
   /**
    * List categories
-   * GET /api/v1/categories (public) or GET /api/admin/categories (includeInactive)
+   * GET /api/v1/categories (includeInactive requires a Firebase administrator)
    */
   getCategories: async (params?: { includeInactive?: boolean }): Promise<{ categories: Category[] }> => {
     const includeInactive = params?.includeInactive === true;
-    const raw = await httpRequest<any>(includeInactive ? '/api/admin/categories' : '/api/v1/categories', {
+    const response = await httpRequest<any>(apiPath('/categories'), {
       method: 'GET',
+      params: { includeInactive: includeInactive ? true : undefined },
       requiresAuth: includeInactive,
       auth: includeInactive ? 'admin' : 'auto'
     });
-    const categories: Category[] = Array.isArray(raw)
-      ? raw
-      : Array.isArray(raw?.categories)
-      ? raw.categories
-      : Array.isArray(raw?.data)
-      ? raw.data
-      : [];
+    const raw = unwrapApiData<any>(response);
+    const categoryItems = Array.isArray(raw) ? raw : Array.isArray(raw?.categories) ? raw.categories : [];
+    const categories: Category[] = categoryItems.map(normalizeCategory);
     return { categories };
   },
 
   /**
    * Get one category (Admin authenticated)
-   * GET /api/admin/categories/:id
+   * GET /api/v1/categories/:id?includeInactive=true
    */
   getCategory: async (id: string): Promise<{ category: Category }> => {
-    const raw = await httpRequest<any>(`/api/admin/categories/${encodeURIComponent(id)}`, {
+    const response = await httpRequest<any>(apiPath(`/categories/${encodeURIComponent(id)}`), {
       method: 'GET',
+      params: { includeInactive: true },
       requiresAuth: true,
       auth: 'admin'
     });
+    const raw = unwrapApiData<any>(response);
     const category = raw?.category || raw?.data || raw;
-    return { category };
+    return { category: normalizeCategory(category) };
   },
 
   /**
    * Create category (Admin authenticated)
-   * POST /api/admin/categories
+   * POST /api/v1/categories
    */
   createCategory: async (categoryPayload: Partial<Category>): Promise<{ category: Category }> => {
-    const raw = await httpRequest<any>('/api/admin/categories', {
+    const response = await httpRequest<any>(apiPath('/categories'), {
       method: 'POST',
-      body: categoryPayload,
+      body: serializeCategory(categoryPayload),
       requiresAuth: true,
       auth: 'admin'
     });
+    const raw = unwrapApiData<any>(response);
     const category = raw?.category || raw?.data || raw;
-    return { category };
+    return { category: normalizeCategory(category) };
   },
 
   /**
    * Update category (Admin authenticated)
-   * PUT /api/admin/categories/:id
+   * PATCH /api/v1/categories/:id
    */
   updateCategory: async (id: string, updates: Partial<Category>): Promise<{ category: Category }> => {
-    const raw = await httpRequest<any>(`/api/admin/categories/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      body: updates,
+    const response = await httpRequest<any>(apiPath(`/categories/${encodeURIComponent(id)}`), {
+      method: 'PATCH',
+      body: serializeCategory(updates),
       requiresAuth: true,
       auth: 'admin'
     });
+    const raw = unwrapApiData<any>(response);
     const category = raw?.category || raw?.data || raw;
-    return { category };
+    return { category: normalizeCategory(category) };
   },
 
   /**
    * Delete category (Admin authenticated)
-   * DELETE /api/admin/categories/:id
+   * DELETE /api/v1/categories/:id
    */
   deleteCategory: async (id: string): Promise<{ success: boolean; message?: string }> => {
-    const raw = await httpRequest<any>(`/api/admin/categories/${encodeURIComponent(id)}`, {
+    const response = await httpRequest<any>(apiPath(`/categories/${encodeURIComponent(id)}`), {
       method: 'DELETE',
       requiresAuth: true,
       auth: 'admin'
     });
+    const raw = unwrapApiData<any>(response);
     return {
       success: raw?.success ?? true,
       message: raw?.message
@@ -581,14 +676,7 @@ export const api = {
   // IMAGE UPLOAD & DELETION ENDPOINTS (proxied through the API server)
   // -----------------------------------------------------------------------
 
-  /**
-   * Upload a product image through the API server (Admin authenticated).
-   * POST /api/admin/cloudinary/upload
-   *
-   * The file is sent as a data URI so Cloudinary credentials never reach the
-   * browser. When Cloudinary is not configured the bundled API server stores
-   * the image locally and returns a same-origin URL instead of failing.
-   */
+  /** Uploads directly to Cloudinary using a short-lived server signature. */
   uploadProductImage: async (
     file: File | Blob,
     folder?: string
@@ -601,54 +689,61 @@ export const api = {
     height?: number;
     bytes?: number;
   }> => {
-    const dataUrl = await readFileAsDataUrl(file);
-    const raw = await httpRequest<any>('/api/admin/cloudinary/upload', {
+    const response = await httpRequest<any>(apiPath('/uploads/signature'), {
       method: 'POST',
-      body: {
-        file: dataUrl,
-        folder: folder || 'zamzam/products',
-        fileName: typeof File !== 'undefined' && file instanceof File ? file.name : undefined
-      },
       requiresAuth: true,
       auth: 'admin',
       timeoutMs: 60000
     });
 
-    const image = raw?.image || raw?.data || raw;
-    if (!image?.url && !image?.secureUrl) {
-      throw new ApiError(
-        'The image upload endpoint did not return a URL.',
-        502,
-        'UPLOAD_FAILED',
-        raw
-      );
+    const signature = unwrapApiData<any>(response);
+    if (!signature?.uploadUrl || !signature?.signature || !signature?.apiKey) {
+      throw new ApiError('The image-signature endpoint returned incomplete upload details.', 502, 'UPLOAD_SIGNATURE_INVALID', signature);
+    }
+    if (file.size > signature.maxBytes) {
+      throw new ApiError(`The selected image exceeds the ${Math.floor(signature.maxBytes / 1024 / 1024)} MiB upload limit.`, 413, 'UPLOAD_TOO_LARGE');
+    }
+    if (folder && folder !== signature.folder) {
+      throw new ApiError('The requested upload folder does not match the server-configured product folder.', 400, 'INVALID_UPLOAD_FOLDER');
     }
 
+    const form = new FormData();
+    form.append('file', file, typeof File !== 'undefined' && file instanceof File ? file.name : 'product-image');
+    form.append('api_key', signature.apiKey);
+    form.append('timestamp', String(signature.timestamp));
+    form.append('folder', signature.folder);
+    form.append('allowed_formats', (signature.allowedFormats || []).join(','));
+    form.append('upload_preset', signature.uploadPreset);
+    form.append('signature', signature.signature);
+    const uploadResponse = await fetch(signature.uploadUrl, { method: 'POST', body: form });
+    const uploaded = await uploadResponse.json().catch(() => ({}));
+    if (!uploadResponse.ok) {
+      const message = uploaded?.error?.message || `Cloudinary upload failed with HTTP ${uploadResponse.status}.`;
+      throw new ApiError(message, uploadResponse.status, 'UPLOAD_FAILED', uploaded);
+    }
     return {
-      url: image.url || image.secureUrl,
-      secureUrl: image.secureUrl || image.url,
-      publicId: image.publicId || image.public_id || '',
-      format: image.format,
-      width: image.width,
-      height: image.height,
-      bytes: image.bytes
+      url: uploaded.secure_url,
+      secureUrl: uploaded.secure_url,
+      publicId: uploaded.public_id,
+      format: uploaded.format,
+      width: uploaded.width,
+      height: uploaded.height,
+      bytes: uploaded.bytes
     };
   },
 
-  /**
-   * Delete image through the API server (Admin authenticated)
-   * POST /api/admin/cloudinary/delete
-   */
+  /** Delete an unreferenced Cloudinary image through the API. */
   deleteCloudinaryImage: async (publicId: string): Promise<{ success: boolean; result?: string }> => {
-    const raw = await httpRequest<any>('/api/admin/cloudinary/delete', {
-      method: 'POST',
+    const response = await httpRequest<any>(apiPath('/uploads'), {
+      method: 'DELETE',
       body: { publicId },
       requiresAuth: true,
       auth: 'admin'
     });
+    const raw = unwrapApiData<any>(response);
     return {
-      success: raw?.success ?? true,
-      result: raw?.result
+      success: raw?.deleted === true,
+      result: raw?.deleted ? 'ok' : 'not found'
     };
   },
 
@@ -665,13 +760,27 @@ export const api = {
     items: Array<{ productId: string; name: string; price?: number; quantity: number; image?: string; sku?: string }>;
     couponCode?: string;
   }): Promise<{ success: boolean; order: Order }> => {
-    const raw = await httpRequest<any>('/api/v1/orders', {
+    const response = await httpRequest<any>(apiPath('/orders'), {
       method: 'POST',
-      body: orderData
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+      body: {
+        customer: {
+          name: orderData.customer.fullName,
+          phone: orderData.customer.phone,
+          address: orderData.customer.address,
+          city: orderData.customer.city,
+          ...(orderData.customer.area ? { area: orderData.customer.area } : {}),
+          ...(orderData.customer.notes ? { notes: orderData.customer.notes } : {})
+        },
+        items: orderData.items.map(item => ({ productId: item.productId, quantity: item.quantity })),
+        ...(orderData.couponCode ? { couponCode: orderData.couponCode } : {}),
+        paymentMethod: 'cash_on_delivery'
+      }
     });
+    const raw = unwrapApiData<any>(response);
     return {
-      success: raw?.success ?? true,
-      order: raw?.order || raw?.data || raw
+      success: true,
+      order: normalizeOrder(raw?.order || raw, orderData)
     };
   },
 
@@ -679,20 +788,31 @@ export const api = {
    * Track order by Order ID or Order Number + customer phone
    * POST /api/v1/orders/:id/track
    */
-  trackOrder: async (orderIdOrNumber: string, phone: string): Promise<{ order: Order }> => {
+  trackOrder: async (orderIdOrNumber: string, phone: string): Promise<{ order: OrderTrackingInfo }> => {
     const cleanId = encodeURIComponent(orderIdOrNumber.trim());
-    const raw = await httpRequest<any>(`/api/v1/orders/${cleanId}/track`, {
+    const response = await httpRequest<any>(apiPath(`/orders/${cleanId}/track`), {
       method: 'POST',
-      body: { phone: phone.trim(), phoneNumber: phone.trim() }
+      body: { phone: phone.trim() }
     });
+    const raw = unwrapApiData<any>(response);
+    const order = raw?.order || raw;
     return {
-      order: raw?.order || raw?.data || raw
+      order: {
+        orderNumber: order.orderNumber,
+        fulfillmentStatus: order.status === 'pending' ? 'placed' : order.status,
+        statusHistory: (order.statusHistory || []).map((entry: any) => ({
+          status: entry.status === 'pending' ? 'placed' : entry.status,
+          timestamp: entry.timestamp || entry.at || ''
+        })),
+        createdAt: order.createdAt,
+        updatedAt: order.updatedAt
+      }
     };
   },
 
   /**
    * List all orders (Admin authenticated)
-   * GET /api/admin/orders
+   * GET /api/v1/orders (administrator Firebase token required)
    */
   getOrders: async (params?: {
     status?: string;
@@ -700,72 +820,67 @@ export const api = {
     page?: number;
     limit?: number;
   }): Promise<{ orders: Order[]; total?: number }> => {
-    const raw = await httpRequest<any>('/api/admin/orders', {
+    const response = await httpRequest<any>(apiPath('/orders'), {
       method: 'GET',
-      params: {
-        status: params?.status && params.status !== 'all' ? params.status : undefined,
-        search: params?.search,
-        page: params?.page,
-        limit: params?.limit
-      },
+      params: { limit: params?.limit || 100 },
       requiresAuth: true,
       auth: 'admin'
     });
+    const raw = unwrapApiData<any>(response);
 
     const orders: Order[] = Array.isArray(raw)
       ? raw
       : Array.isArray(raw?.orders)
       ? raw.orders
-      : Array.isArray(raw?.data)
-      ? raw.data
       : [];
+    const normalizedOrders = orders.map(order => normalizeOrder(order));
 
     return {
-      orders,
-      total: raw?.total ?? orders.length
+      orders: normalizedOrders,
+      total: normalizedOrders.length
     };
   },
 
   /**
    * List only the signed-in customer's own orders (Firebase ID token required)
-   * GET /api/orders/my
+   * GET /api/v1/orders/my
    */
   getCustomerOrders: async (): Promise<{ orders: Order[] }> => {
-    const raw = await httpRequest<any>('/api/orders/my', {
+    const response = await httpRequest<any>(apiPath('/orders/my'), {
       method: 'GET',
       requiresAuth: true,
       auth: 'customer'
     });
+    const raw = unwrapApiData<any>(response);
 
     const orders: Order[] = Array.isArray(raw)
       ? raw
       : Array.isArray(raw?.orders)
       ? raw.orders
-      : Array.isArray(raw?.data)
-      ? raw.data
       : [];
 
-    return { orders };
+    return { orders: orders.map(order => normalizeOrder(order)) };
   },
 
   /**
    * Get single order by ID (Admin authenticated)
-   * GET /api/admin/orders/:id
+   * GET /api/v1/orders/:id
    */
   getOrder: async (id: string): Promise<{ order: Order }> => {
-    const raw = await httpRequest<any>(`/api/admin/orders/${encodeURIComponent(id)}`, {
+    const response = await httpRequest<any>(apiPath(`/orders/${encodeURIComponent(id)}`), {
       method: 'GET',
       requiresAuth: true,
       auth: 'admin'
     });
+    const raw = unwrapApiData<any>(response);
     return {
-      order: raw?.order || raw?.data || raw
+      order: normalizeOrder(raw?.order || raw)
     };
   },
 
   /**
    * Update order status and fulfillment notes (Admin authenticated)
-   * PUT /api/admin/orders/:id/status
+   * PATCH /api/v1/orders/:id/status
    */
   updateOrderStatus: async (
     id: string,
@@ -777,18 +892,19 @@ export const api = {
       internalNotes?: string;
     }
   ): Promise<{ success: boolean; order: Order }> => {
-    const raw = await httpRequest<any>(`/api/admin/orders/${encodeURIComponent(id)}/status`, {
-      method: 'PUT',
+    const response = await httpRequest<any>(apiPath(`/orders/${encodeURIComponent(id)}/status`), {
+      method: 'PATCH',
       body: {
-        status,
+        status: status === 'placed' ? 'confirmed' : status,
         ...extra
       },
       requiresAuth: true,
       auth: 'admin'
     });
+    const raw = unwrapApiData<any>(response);
     return {
-      success: raw?.success ?? true,
-      order: raw?.order || raw?.data || raw
+      success: true,
+      order: normalizeOrder(raw?.order || raw)
     };
   },
 
@@ -798,82 +914,48 @@ export const api = {
 
   validateCoupon: async (code: string, subtotal: number) => {
     try {
-      const raw = await httpRequest<any>('/api/v1/coupons/validate', {
+      const response = await httpRequest<any>(apiPath('/coupons/validate'), {
         method: 'POST',
         body: { code, subtotal }
       });
-      return raw;
+      return unwrapApiData<any>(response);
     } catch (err: any) {
-      // The API rejects an unknown/expired coupon with HTTP 400 and a structured
-      // body. Surface that reply instead of masking it with a fake coupon.
-      if (err instanceof ApiError && err.status === 400 && err.details) {
+      if (err instanceof ApiError && err.status === 400) {
         return {
           valid: false,
-          error: err.details.error || err.details.message || err.message
+          error: err.message
         };
       }
-      // Network fallback only, so a transient outage does not block checkout.
-      const normalized = code.trim().toUpperCase();
-      if (normalized === 'SAVE10' || normalized === 'ZAMZAM10') {
-        const discountAmount = Math.round(subtotal * 0.1);
-        return {
-          valid: true,
-          coupon: {
-            code: normalized,
-            discountType: 'percentage' as const,
-            discountValue: 10,
-            amountSaved: discountAmount
-          }
-        };
-      }
-      return { valid: false, error: err?.message || 'Could not validate the coupon. Please try again.' };
+      throw err;
     }
   },
 
   getBanners: async (): Promise<{ banners: Banner[] }> => {
-    try {
-      const raw = await httpRequest<any>('/api/v1/banners', { method: 'GET' });
-      return { banners: raw.banners || raw.data || [] };
-    } catch {
-      return {
-        banners: [
-          {
-            id: 'b-default',
-            title: 'Refined Everyday Essentials',
-            subtitle: 'Salon-grade brushes & aesthetic acrylic organizers designed for your daily routine.',
-            badgeText: 'Curated Collection',
-            imageUrl: '/src/assets/images/hero_lifestyle_store_1792058412869.jpg',
-            linkUrl: '#collection',
-            ctaText: 'Explore Catalog',
-            isActive: true,
-            displayOrder: 1
-          }
-        ]
-      };
-    }
+    const response = await httpRequest<any>(apiPath('/banners'), { method: 'GET' });
+    const raw = unwrapApiData<any>(response);
+    const banners: Banner[] = Array.isArray(raw) ? raw : Array.isArray(raw?.banners) ? raw.banners : [];
+    return { banners };
   },
 
   getSettings: async (): Promise<{ settings: StoreSettings }> => {
-    try {
-      const raw = await httpRequest<any>('/api/v1/settings', { method: 'GET' });
-      return { settings: raw.settings || raw.data || raw };
-    } catch {
-      return {
-        settings: {
-          storeName: 'Zamzam',
-          tagline: 'Refined Everyday Beauty, Hair & Home Essentials',
-          contactPhone: '03049002888',
-          contactEmail: 'ahsanullahyousafzai90@gmail.com',
-          address: 'Phase 5 DHA, Lahore, Pakistan',
-          currency: 'PKR',
-          standardShippingFee: 200,
-          freeShippingThreshold: 3000,
-          returnPolicy: '7-day replacement or return on personal accessories.',
-          deliveryPolicy: 'Fast nationwide Cash on Delivery (COD). 2-3 business days in major cities.',
-          aboutText: 'Curating salon-grade brushes and aesthetic storage.'
-        }
-      };
-    }
+    const response = await httpRequest<any>(apiPath('/settings'), { method: 'GET' });
+    const raw = unwrapApiData<any>(response);
+    return {
+      settings: {
+        storeName: 'Zamzam',
+        tagline: 'Refined Everyday Beauty, Hair & Home Essentials',
+        contactPhone: '',
+        contactEmail: '',
+        address: '',
+        currency: 'PKR',
+        standardShippingFee: 0,
+        freeShippingThreshold: 3000,
+        returnPolicy: '',
+        deliveryPolicy: '',
+        aboutText: '',
+        ...raw
+      }
+    };
   },
 
   // -----------------------------------------------------------------------
@@ -881,87 +963,31 @@ export const api = {
   // -----------------------------------------------------------------------
 
   adminGetBanners: async (): Promise<{ banners: Banner[] }> => {
-    const raw = await httpRequest<any>('/api/admin/banners', {
-      method: 'GET',
-      requiresAuth: true,
-      auth: 'admin'
-    });
-    const banners: Banner[] = Array.isArray(raw?.banners)
-      ? raw.banners
-      : Array.isArray(raw?.data)
-      ? raw.data
-      : [];
+    const response = await httpRequest<any>(apiPath('/banners'), { method: 'GET' });
+    const raw = unwrapApiData<any>(response);
+    const banners: Banner[] = Array.isArray(raw) ? raw : [];
     return { banners };
   },
-  adminSaveBanner: async (banner: Partial<Banner>): Promise<{ banner: Banner }> => {
-    const raw = await httpRequest<any>(
-      banner.id ? `/api/admin/banners/${encodeURIComponent(banner.id)}` : '/api/admin/banners',
-      {
-        method: banner.id ? 'PUT' : 'POST',
-        body: banner,
-        requiresAuth: true,
-        auth: 'admin'
-      }
-    );
-    return { banner: raw?.banner || raw?.data || raw };
+  adminSaveBanner: async (_banner: Partial<Banner>): Promise<{ banner: Banner }> => {
+    return unsupportedBackendFeature('Banner management');
   },
-  adminDeleteBanner: async (id: string): Promise<{ success: boolean }> => {
-    const raw = await httpRequest<any>(`/api/admin/banners/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-      requiresAuth: true,
-      auth: 'admin'
-    });
-    return { success: raw?.success ?? true };
+  adminDeleteBanner: async (_id: string): Promise<{ success: boolean }> => {
+    return unsupportedBackendFeature('Banner management');
   },
   adminGetCoupons: async (): Promise<{ coupons: Coupon[] }> => {
-    const raw = await httpRequest<any>('/api/admin/coupons', {
-      method: 'GET',
-      requiresAuth: true,
-      auth: 'admin'
-    });
-    const coupons: Coupon[] = Array.isArray(raw?.coupons)
-      ? raw.coupons
-      : Array.isArray(raw?.data)
-      ? raw.data
-      : [];
-    return { coupons };
+    return unsupportedBackendFeature('Coupon management');
   },
-  adminSaveCoupon: async (coupon: Partial<Coupon>): Promise<{ coupon: Coupon }> => {
-    const raw = await httpRequest<any>(
-      coupon.id ? `/api/admin/coupons/${encodeURIComponent(coupon.id)}` : '/api/admin/coupons',
-      {
-        method: coupon.id ? 'PUT' : 'POST',
-        body: coupon,
-        requiresAuth: true,
-        auth: 'admin'
-      }
-    );
-    return { coupon: raw?.coupon || raw?.data || raw };
+  adminSaveCoupon: async (_coupon: Partial<Coupon>): Promise<{ coupon: Coupon }> => {
+    return unsupportedBackendFeature('Coupon management');
   },
-  adminDeleteCoupon: async (id: string): Promise<{ success: boolean }> => {
-    const raw = await httpRequest<any>(`/api/admin/coupons/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-      requiresAuth: true,
-      auth: 'admin'
-    });
-    return { success: raw?.success ?? true };
+  adminDeleteCoupon: async (_id: string): Promise<{ success: boolean }> => {
+    return unsupportedBackendFeature('Coupon management');
   },
   adminGetSettings: async (): Promise<{ settings: StoreSettings }> => {
-    const raw = await httpRequest<any>('/api/admin/settings', {
-      method: 'GET',
-      requiresAuth: true,
-      auth: 'admin'
-    });
-    return { settings: raw?.settings || raw?.data || raw };
+    return api.getSettings();
   },
-  adminUpdateSettings: async (settings: Partial<StoreSettings>): Promise<{ settings: StoreSettings }> => {
-    const raw = await httpRequest<any>('/api/admin/settings', {
-      method: 'PUT',
-      body: settings,
-      requiresAuth: true,
-      auth: 'admin'
-    });
-    return { settings: raw?.settings || raw?.data || raw };
+  adminUpdateSettings: async (_settings: Partial<StoreSettings>): Promise<{ settings: StoreSettings }> => {
+    return unsupportedBackendFeature('Store settings management');
   },
 
   // -----------------------------------------------------------------------
@@ -971,46 +997,38 @@ export const api = {
   /**
    * Returns the backend-verified administrator identity. This is the only
    * source of truth for whether the admin console may open.
-   * GET /api/admin/me
+   * GET /api/v1/auth/admin/me
    */
   adminMe: async (): Promise<AdminIdentity> => {
-    const raw = await httpRequest<any>('/api/admin/me', {
+    const response = await httpRequest<any>(apiPath('/auth/admin/me'), {
       method: 'GET',
+      requiresAuth: true,
       auth: 'admin'
     });
-    const user = raw?.user;
+    const user = unwrapApiData<any>(response);
     if (!user || user.role !== 'admin' || !user.provider) {
-      throw new ApiError('The backend did not confirm an administrator session.', 401, 'UNAUTHENTICATED', raw);
+      throw new ApiError('The backend did not confirm an administrator session.', 401, 'UNAUTHENTICATED', user);
     }
     return user as AdminIdentity;
   },
 
   /**
-   * Local recovery administrator sign-in. The session is delivered as an
-   * httpOnly cookie; no bearer token is stored in the browser.
-   * POST /api/admin/login
+   * The deployed API supports Firebase administrator sign-in only.
    */
   adminLogin: async (
-    username: string,
-    pass: string
+    _username: string,
+    _pass: string
   ): Promise<{ success: boolean; user?: Partial<AdminIdentity> }> => {
-    return httpRequest<any>('/api/admin/login', {
-      method: 'POST',
-      body: { username, password: pass },
-      auth: 'auto'
-    });
+    throw new ApiError(
+      'This API supports Firebase administrator email sign-in only. Sign in with an administrator Firebase account.',
+      501,
+      'LOCAL_ADMIN_UNSUPPORTED'
+    );
   },
 
-  /** Revokes the local administrator session and clears the cookie. */
+  /** Signs out the dedicated Firebase administrator identity. */
   adminLogout: async (): Promise<{ success: boolean }> => {
-    try {
-      return await httpRequest<any>('/api/admin/logout', {
-        method: 'POST',
-        auth: 'admin'
-      });
-    } catch {
-      return { success: true };
-    }
+    return { success: true };
   },
 
   /**
@@ -1019,16 +1037,10 @@ export const api = {
    * POST /api/admin/change-password
    */
   changeAdminPassword: async (
-    currentPassword: string,
-    newPassword: string
+    _currentPassword: string,
+    _newPassword: string
   ): Promise<{ success: boolean; message?: string; user?: Partial<AdminIdentity> }> => {
-    return httpRequest<any>('/api/admin/change-password', {
-      method: 'POST',
-      body: { currentPassword, newPassword },
-      requiresAuth: true,
-      auth: 'admin',
-      timeoutMs: 30000
-    });
+    return unsupportedBackendFeature('Local administrator password changes');
   },
 
   /**
@@ -1037,26 +1049,11 @@ export const api = {
    * POST /api/admin/security/password-changed
    */
   recordAdminPasswordChange: async (): Promise<{ success: boolean }> => {
-    return httpRequest<any>('/api/admin/security/password-changed', {
-      method: 'POST',
-      body: {},
-      requiresAuth: true,
-      auth: 'admin'
-    });
+    return unsupportedBackendFeature('Administrator audit logging');
   },
 
   /** Security and catalogue audit events (administrator only). */
   adminGetAuditLogs: async (): Promise<{ auditLogs: AuditLog[] }> => {
-    const raw = await httpRequest<any>('/api/admin/audit-logs', {
-      method: 'GET',
-      requiresAuth: true,
-      auth: 'admin'
-    });
-    const auditLogs: AuditLog[] = Array.isArray(raw?.auditLogs)
-      ? raw.auditLogs
-      : Array.isArray(raw?.data)
-      ? raw.data
-      : [];
-    return { auditLogs };
+    return unsupportedBackendFeature('Administrator audit log access');
   }
 };

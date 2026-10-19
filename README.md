@@ -21,20 +21,23 @@ credentials in Vite-prefixed variables. Netlify builds only the static `dist/`
 bundle. Run this directory's Express server on a separate Node.js host and
 configure Netlify's API URL or same-origin proxy accordingly.
 
-The repository's Netlify build currently sets the public
-`VITE_API_BASE_URL` to `https://clientbackend2-qu4dpdu9.b4a.run`. Requests such
-as `/health/live` are sent to that origin. The optional `client_backend/`
-service has a different API and authentication contract from this storefront's
-Express server, so changing the base URL alone does not make all storefront and
-admin operations compatible. The same backend URL is also the frontend's
-default when `VITE_API_BASE_URL` is unset, including local Vite runs; set that
-variable or the admin portal's API override only when you intentionally need
-to target a different backend.
+The Netlify production build and frontend default use
+`https://clientbackend2-qu4dpdu9.b4a.run`. The API client targets the standalone
+backend's `/api/v1` routes, translates storefront product/order data to its
+contract, and sends Firebase ID tokens for administrator requests. Local
+frontend ports 3000, 5173, and 8080 are allowed by the backend CORS defaults.
+Set `VITE_API_BASE_URL` in a local `.env` only when targeting a different API.
 
-If no administrator can sign in yet, either add a Firebase administrator UID to
-`ADMIN_UIDS` (recommended) or create/reset the local recovery account with
-`npm run admin:set-password`. Deployments that still contain the removed default
-password must run that recovery command once; the old password is refused.
+The standalone API does not provide administrator management endpoints for
+banners, coupons, store settings, or audit logs, nor local username/password
+administrator sessions. Those controls remain unavailable when this frontend
+is connected to `client_backend`; Firebase administrator email sign-in is
+required.
+
+For the deployed standalone backend, add the Firebase administrator UID to its
+server-side `ADMIN_UIDS` setting. The local recovery account is only available
+when running this frontend's bundled Express server; it is not accepted by
+`client_backend`.
 
 Other scripts:
 
@@ -53,7 +56,9 @@ Other scripts:
 Administrator access is verified by the **server** on every protected request.
 The browser is never trusted to decide who is an administrator.
 
-There are two supported administrator identities:
+The bundled Express server supports Firebase and local recovery accounts. When
+the frontend targets the deployed `client_backend`, only Firebase administrator
+accounts are supported:
 
 1. **Firebase administrator (recommended).** Sign in at `/adminportal` with a
    Firebase Email/Password account. Authentication alone is not enough: the API
@@ -63,14 +68,13 @@ There are two supported administrator identities:
    - a server-issued Firebase custom claim `admin: true`.
    If a valid Firebase account is not authorized, the login screen shows its UID
    so a trusted operator can add it to `ADMIN_UIDS` and restart the API.
-2. **Local recovery account.** A username/password account stored in
-   `data/store.json` as a salted **scrypt** hash. It exists so an operator cannot
-   be locked out of their own deployment. It has **no default password**: a
-   removed default hash is refused at login (it could otherwise be used to take
-   over the account) and must be replaced with `npm run admin:set-password`.
-   An account explicitly flagged for rotation must also change its password
-   before any admin operation. Disable the local account with
-   `ALLOW_LOCAL_ADMIN=false` once a Firebase administrator works.
+The bundled Express server also supports a **local recovery account**. It is a
+username/password account stored in `data/store.json` as a salted **scrypt**
+hash. It has **no default password**: a removed default hash is refused at
+login and must be replaced with `npm run admin:set-password`. An account
+explicitly flagged for rotation must change its password before admin
+operations. This recovery account is not available through the standalone
+`client_backend`.
 
 Customers may use Firebase normally, but a customer Firebase token receives
 `403` on every admin endpoint. Signing into the storefront does not create an
@@ -82,14 +86,14 @@ Use the **Security** tab in the admin console:
 
 - Firebase-managed accounts: the current password is verified with Firebase
   re-authentication, then the password is updated with the Firebase client SDK.
-  The password never reaches the Zamzam API server; only the event is audited.
+  The password never reaches the API server.
 - Local recovery account: the API verifies the current password, enforces the
   password policy, stores a new scrypt hash, rotates the session secret and
   revokes all previous administrator sessions.
 
-The local session is delivered as an `HttpOnly`, `SameSite=Strict` cookie; no
-administrator token is kept in `localStorage` or `sessionStorage`. Cookie-based
-writes require the `X-Zamzam-Admin` request header (CSRF defence).
+In bundled-server mode, local recovery sessions use an `HttpOnly`,
+`SameSite=Strict` cookie. The Netlify deployment uses Firebase bearer tokens
+and does not use local recovery cookies.
 
 If the local password is unknown, stop the API server and run
 `npm run admin:set-password` from this directory. The prompt hides input and the
@@ -102,7 +106,7 @@ password is never logged or passed as an argument. Restart the server afterwards
 2. If they are not yet authorized, the login screen displays their UID.
 3. Add that UID to `ADMIN_UIDS` in `.env` (comma-separated for multiple admins),
    then restart the API.
-4. Verify with `GET /api/admin/me` while signed in, or simply reopen
+4. Verify with `GET /api/v1/auth/admin/me` while signed in, or simply reopen
    `/adminportal`.
 
 Never prefix `ADMIN_UIDS` with `VITE_`; Vite would expose it to the browser.
@@ -140,10 +144,9 @@ Restart the API after changing server-side environment variables.
 
 ## API base URL
 
-`src/services/api.ts` defaults to **same origin**, so requests go to whichever
-host served the page (the bundled server in development and production). To
-point the storefront at a separately hosted API, set `VITE_API_BASE_URL` or use
-the admin console's "Backend Base URL Override". Both a bare origin
+`src/services/api.ts` defaults to the deployed backend origin. To point the
+storefront at a different API, set `VITE_API_BASE_URL` or use the admin
+console's "Backend Base URL Override". Both a bare origin
 (`https://api.example.com`) and the versioned form
 (`https://api.example.com/api/v1`) are accepted; the prefix is normalized so
 requests never become `/api/v1/api/v1/...`.
@@ -153,8 +156,9 @@ requests never become `/api/v1/api/v1/...`.
 ### Recommended topology
 
 Run this server as **one service** that serves both the SPA (`dist/`) and the API.
-That keeps the administrator cookie same-origin, avoids CORS, and means the
-frontend needs no API base URL.
+That keeps the administrator cookie same-origin and avoids CORS when using the
+bundled Express server. The current Netlify deployment instead serves the SPA
+separately and calls `client_backend` with Firebase bearer tokens.
 
 ### Build and start
 

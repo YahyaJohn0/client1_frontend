@@ -129,8 +129,6 @@ export const AdminSecurity: React.FC<AdminSecurityProps> = ({
         // in the SDK. The password never reaches the Zamzam API server.
         await reauthenticateAdmin(currentPassword);
         await updateAdminPassword(newPassword);
-        // Best-effort audit hook; the password change already succeeded.
-        await api.recordAdminPasswordChange().catch(() => undefined);
       } else {
         await api.changeAdminPassword(currentPassword, newPassword);
       }

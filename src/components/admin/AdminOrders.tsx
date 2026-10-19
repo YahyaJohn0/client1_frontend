@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Search,
   Filter,
@@ -37,6 +37,19 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({ initialSelectedOrder }
   const [cancelReason, setCancelReason] = useState('');
   const [internalNotes, setInternalNotes] = useState('');
   const [isSavingStatus, setIsSavingStatus] = useState(false);
+  const visibleOrders = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return orders.filter(order => {
+      const matchesStatus = statusFilter === 'all' || order.fulfillmentStatus === statusFilter;
+      const matchesSearch = !query || [
+        order.orderNumber,
+        order.customer.fullName,
+        order.customer.phone,
+        order.customer.city
+      ].some(value => value?.toLowerCase().includes(query));
+      return matchesStatus && matchesSearch;
+    });
+  }, [orders, search, statusFilter]);
 
   const loadOrders = async () => {
     setIsLoading(true);
@@ -141,7 +154,7 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({ initialSelectedOrder }
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="font-heading text-xl font-bold text-slate-900">
-            Order Fulfillment & Management ({orders.length})
+            Order Fulfillment & Management ({visibleOrders.length})
           </h2>
           <p className="text-xs text-slate-500">
             Process guest checkout orders, assign courier dispatches, print invoices, and update statuses.
@@ -203,7 +216,7 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({ initialSelectedOrder }
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {orders.map((order) => (
+              {visibleOrders.map((order) => (
                 <tr key={order.id} className="hover:bg-slate-50/60">
                   <td className="py-3 px-4 font-mono font-bold text-slate-900">#{order.orderNumber}</td>
                   <td className="py-3 px-4 text-slate-500 whitespace-nowrap">

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Search, Package, CheckCircle, Clock, Truck, MapPin, AlertCircle, RefreshCw } from 'lucide-react';
-import type { Order, OrderStatus } from '../types/store.ts';
+import { Search, CheckCircle, Clock, Truck, AlertCircle } from 'lucide-react';
+import type { OrderStatus } from '../types/store.ts';
+import type { OrderTrackingInfo } from '../services/api.ts';
 import { api } from '../services/api.ts';
-import { formatPKR } from '../utils/pricing.ts';
 
 const STATUS_STEPS: Array<{ key: OrderStatus; label: string; desc: string }> = [
   { key: 'placed', label: 'Order Placed', desc: 'Received and registered in system' },
@@ -17,7 +17,7 @@ const STATUS_STEPS: Array<{ key: OrderStatus; label: string; desc: string }> = [
 export const OrderTrackingView: React.FC = () => {
   const [orderNumber, setOrderNumber] = useState('');
   const [phone, setPhone] = useState('');
-  const [order, setOrder] = useState<Order | null>(null);
+  const [order, setOrder] = useState<OrderTrackingInfo | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -159,23 +159,8 @@ export const OrderTrackingView: React.FC = () => {
               }`}>
                 {order.fulfillmentStatus.replace('_', ' ')}
               </span>
-              <p className="text-xs font-bold text-slate-900 mt-1 tabular-nums">
-                COD: {formatPKR(order.total)}
-              </p>
             </div>
           </div>
-
-          {/* Courier Banner if Shipped */}
-          {order.trackingNumber && (
-            <div className="px-5 py-3 bg-amber-50/70 border-b border-amber-100 flex items-center justify-between text-xs text-amber-900">
-              <div className="flex items-center gap-2">
-                <Truck className="w-4 h-4 text-amber-700" />
-                <span>Courier: <strong>{order.courierName || 'Standard Express'}</strong></span>
-                <span className="text-amber-400">·</span>
-                <span>Tracking ID: <strong className="font-mono">{order.trackingNumber}</strong></span>
-              </div>
-            </div>
-          )}
 
           {/* Progress Timeline */}
           <div className="p-6 sm:p-8">
@@ -186,7 +171,7 @@ export const OrderTrackingView: React.FC = () => {
             {order.fulfillmentStatus === 'cancelled' ? (
               <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 mb-6">
                 <p className="font-bold text-rose-900">This order was cancelled.</p>
-                <p className="mt-1">{order.cancelReason || 'Cancelled by store administrator.'}</p>
+                <p className="mt-1">Cancelled by store administrator.</p>
               </div>
             ) : (
               <div className="relative pl-6 sm:pl-8 space-y-6 before:absolute before:left-3 sm:before:left-4 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
@@ -233,30 +218,6 @@ export const OrderTrackingView: React.FC = () => {
               </div>
             )}
 
-            {/* Items Summary Table */}
-            <div className="mt-8 pt-6 border-t border-slate-100">
-              <h3 className="font-heading text-xs font-bold text-slate-900 uppercase tracking-wider mb-3">
-                Items in This Parcel
-              </h3>
-              <div className="divide-y divide-slate-100">
-                {order.items.map((item, idx) => (
-                  <div key={idx} className="py-2.5 flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg overflow-hidden bg-slate-100 shrink-0">
-                        <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
-                      </div>
-                      <div>
-                        <p className="font-semibold text-slate-900">{item.name}</p>
-                        <p className="text-[10px] text-slate-500">Qty: {item.quantity}</p>
-                      </div>
-                    </div>
-                    <span className="font-bold text-slate-900 tabular-nums">
-                      {formatPKR(item.price * item.quantity)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
           </div>
         </div>
       )}
