@@ -2,8 +2,8 @@
 # persistent Node.js host; Netlify does not run this app's long-lived server.
 
 [build]
-  base = "client_frontend"
-  command = "npm ci && npm run build"
+  base = "."
+  command = "bun run build"
   publish = "dist"
 
 [build.environment]

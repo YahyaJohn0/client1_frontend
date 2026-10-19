@@ -8,11 +8,11 @@
 | Storefront Express API/admin server | `client_frontend/server.ts` | Long-running Node.js host with a persistent disk |
 | Optional Firebase/Firestore API | `client_backend/` | Separate Node.js service; it has a different API contract and is not a drop-in server for the storefront |
 
-The root [`netlify.toml`](./netlify.toml) sets `client_frontend` as the build base and publishes its Vite `dist/` output. Netlify serves the static bundle only; it does not run either Express server as a permanent service. The previous `frontent/` path is not the storefront source.
+The root [`netlify.toml`](./netlify.toml) builds the storefront from this repository's root and publishes its Vite `dist/` output. Netlify serves the static bundle only; it does not run either Express server as a permanent service.
 
 ## Netlify storefront
 
-- Build command: `npm ci && npm run build`
+- Build command: `bun run build`
 - Publish directory: `dist`
 - Node.js: 22
 - Set the public Vite Firebase values needed by sign-in: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_DATABASE_URL` (if used), `VITE_FIREBASE_PROJECT_ID`, and `VITE_FIREBASE_APP_ID`.
