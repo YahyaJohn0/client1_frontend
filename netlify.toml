@@ -1,0 +1,33 @@
+# Netlify builds only the Vite storefront. The Express API must run on a
+# persistent Node.js host; Netlify does not run this app's long-lived server.
+
+[build]
+  base = "client_frontend"
+  command = "npm ci && npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+  VITE_API_BASE_URL = "https://clientbackend2-qu4dpdu9.b4a.run"
+  # These are verified non-secret configuration values, not credentials.
+  # Firebase web settings and VITE_API_BASE_URL are public browser config.
+  SECRETS_SCAN_OMIT_KEYS = "LOG_LEVEL,NODE_ENV,PORT,FIREBASE_PROJECT_ID,CORS_ORIGINS,CLOUDINARY_UPLOAD_PRESET,VITE_CLOUDINARY_UPLOAD_PRESET,VITE_FIREBASE_API_KEY,VITE_FIREBASE_AUTH_DOMAIN,VITE_FIREBASE_DATABASE_URL,VITE_FIREBASE_PROJECT_ID,VITE_FIREBASE_APP_ID,VITE_API_BASE_URL"
+
+# Optional same-origin proxy. Replace the host with the separately deployed
+# Express API; keeping these rules preserves same-origin admin-cookie behavior.
+# [[redirects]]
+#   from = "/api/*"
+#   to = "https://YOUR-BACKEND.onrender.com/api/:splat"
+#   status = 200
+#   force = true
+#
+# [[redirects]]
+#   from = "/uploads/*"
+#   to = "https://YOUR-BACKEND.onrender.com/uploads/:splat"
+#   status = 200
+#   force = true
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
