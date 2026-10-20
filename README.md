@@ -11,22 +11,43 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:3000>. The admin console lives at
-<http://localhost:3000/adminportal>.
+Open <http://localhost:8080>. The admin console lives at
+<http://localhost:8080/adminportal>.
 
-Copy `.env.example` to `.env` and configure the public `VITE_FIREBASE_*` values
-for the browser. Server settings use non-`VITE_` names such as
-`FIREBASE_PROJECT_ID`, `ADMIN_UIDS`, and `CLOUDINARY_URL`; never put private
-credentials in Vite-prefixed variables. Netlify builds only the static `dist/`
-bundle. Run this directory's Express server on a separate Node.js host and
+Copy `.env.example` to `.env` and configure the public Firebase settings
+(`FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_DATABASE_URL`,
+`FIREBASE_PROJECT_ID`, and `FIREBASE_APP_ID`) plus `API_BASE_URL`. The Vite
+configuration explicitly embeds only those public values in the browser
+bundle. Keep service-account JSON, Cloudinary API secrets, administrator
+allowlists, and signing secrets server-side. Netlify builds only the static
+`dist/` bundle. Run this directory's Express server on a Node.js host and
 configure Netlify's API URL or same-origin proxy accordingly.
 
 The Netlify production build and frontend default use
-`https://clientbackend2-qu4dpdu9.b4a.run`. The API client targets the standalone
-backend's `/api/v1` routes, translates storefront product/order data to its
-contract, and sends Firebase ID tokens for administrator requests. Local
+`https://clientbackend-taxt7mcy.b4a.run`. The API client targets the standalone
+backend's `/api/v1` routes for backend-backed features, translates their data
+to its contract, and sends Firebase ID tokens for administrator requests. Local
 frontend ports 3000, 5173, and 8080 are allowed by the backend CORS defaults.
-Set `VITE_API_BASE_URL` in a local `.env` only when targeting a different API.
+Set `API_BASE_URL` in a local `.env` only when targeting a different API.
+
+Admin product management uses the backend's Firebase Realtime Database
+`/demoProducts` endpoints. Product image files are sent to the authenticated
+backend, which streams them to Cloudinary using the configured `zamzam` preset
+and `samples/ecommerce` folder. The backend returns the HTTPS URL and Cloudinary
+public ID; these are saved to `/demoProducts` together with the product details
+when the administrator saves the product. Configure `FIREBASE_DATABASE_URL`, Cloudinary credentials,
+`CLOUDINARY_UPLOAD_PRESET=zamzam`, and
+`CLOUDINARY_ASSET_FOLDER=samples/ecommerce` on the backend host. No Cloudinary
+secret belongs in frontend build configuration.
+
+The storefront loads active products directly from Firebase Realtime Database
+at `/demoProducts`, using `FIREBASE_DATABASE_URL` and the public Firebase
+browser configuration. The read is a query ordered by
+`isActive == true`; Firebase RTDB rules must allow that exact public query and
+deny browser writes. Product records contain Cloudinary HTTPS image URLs, not
+image binaries or Cloudinary credentials. Customer signup and login already
+use Firebase Authentication directly. Categories, settings, checkout, orders,
+and administrator operations continue to use the API.
 
 The standalone API does not provide administrator management endpoints for
 banners, coupons, store settings, or audit logs, nor local username/password
@@ -124,8 +145,9 @@ browser, and public signup always creates a customer.
 
 Copy `.env.example` to `.env` and fill in what you need:
 
-- `VITE_FIREBASE_*` — public Firebase browser values, required for customer and
-  administrator sign-in.
+- `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_DATABASE_URL`,
+  `FIREBASE_PROJECT_ID`, `FIREBASE_APP_ID` — public Firebase browser values,
+  required for customer sign-in and product reads.
 - `FIREBASE_PROJECT_ID` — server-side project ID used to verify ID tokens.
   `FIREBASE_API_KEY` and other `FIREBASE_*` settings are needed only for
   optional server-side Firestore mirroring.
@@ -145,7 +167,7 @@ Restart the API after changing server-side environment variables.
 ## API base URL
 
 `src/services/api.ts` defaults to the deployed backend origin. To point the
-storefront at a different API, set `VITE_API_BASE_URL` or use the admin
+storefront at a different API, set `API_BASE_URL` or use the admin
 console's "Backend Base URL Override". Both a bare origin
 (`https://api.example.com`) and the versioned form
 (`https://api.example.com/api/v1`) are accepted; the prefix is normalized so
@@ -183,7 +205,7 @@ middleware.
 | `ADMIN_COOKIE_SECURE` | Defaults to `true` in production; only `false` for local HTTP |
 | `ADMIN_UIDS` | Comma-separated Firebase administrator UIDs (server-only) |
 | `ALLOW_LOCAL_ADMIN` | `false` once Firebase administrators work |
-| `VITE_FIREBASE_*` | Firebase web configuration (public, build-time) |
+| `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_DATABASE_URL`, `FIREBASE_PROJECT_ID`, `FIREBASE_APP_ID` | Firebase web configuration (public, build-time) |
 | `FIREBASE_PROJECT_ID` | Server-side project ID for ID-token verification |
 | `CLOUDINARY_URL` | Server-side Cloudinary secret (recommended for hosted images) |
 | `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_UPLOAD_PRESET` | Public Cloudinary identifiers; the server performs uploads |
@@ -215,7 +237,7 @@ redeploy resets products/orders and the admin account.
   administrator cookies are `Secure` in production.
 - `FORCE_HTTPS=true` adds a redirect if the proxy does not.
 - Same-origin deployment needs no `CORS_ORIGINS`.
-- If the SPA is hosted elsewhere, set `VITE_API_BASE_URL=https://api.example.com`
+- If the SPA is hosted elsewhere, set `API_BASE_URL=https://api.example.com`
   **at frontend build time** and `CORS_ORIGINS=https://www.example.com` on the
   API. Firebase administrator sign-in works cross-origin; the local admin cookie
   is `SameSite=Strict` and is **not** sent cross-origin — use Firebase admin or
@@ -237,16 +259,19 @@ redeploy resets products/orders and the admin account.
 
 ### Docker
 
-A production `Dockerfile` and `.dockerignore` are included. `VITE_*` values are
-**baked into the SPA at build time**, so pass them as build arguments; the
-Firebase project ID is also needed at runtime for ID-token verification.
+A production `Dockerfile` and `.dockerignore` are included. Only public Firebase
+configuration and `API_BASE_URL` are baked into the SPA at build time; pass
+those values as build arguments. The Firebase project ID is also needed at
+runtime for ID-token verification.
 
 ```bash
 docker build \
-  --build-arg VITE_FIREBASE_API_KEY=... \
-  --build-arg VITE_FIREBASE_AUTH_DOMAIN=... \
-  --build-arg VITE_FIREBASE_PROJECT_ID=... \
-  --build-arg VITE_FIREBASE_APP_ID=... \
+  --build-arg FIREBASE_API_KEY=... \
+  --build-arg FIREBASE_AUTH_DOMAIN=... \
+  --build-arg FIREBASE_DATABASE_URL=... \
+  --build-arg FIREBASE_PROJECT_ID=... \
+  --build-arg FIREBASE_APP_ID=... \
+  --build-arg API_BASE_URL=... \
   -t zamzam-store .
 
 docker run --rm -p 3000:3000 \

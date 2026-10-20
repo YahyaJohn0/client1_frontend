@@ -39,7 +39,7 @@ export interface OrderTrackingInfo {
 
 // Centralized API Configuration
 const STORAGE_CUSTOM_BASE_URL = 'zamzam_custom_api_base_url';
-const DEFAULT_API_BASE_URL = 'https://clientbackend2-qu4dpdu9.b4a.run';
+const DEFAULT_API_BASE_URL = 'https://clientbackend-taxt7mcy.b4a.run';
 const API_PREFIX = '/api/v1';
 
 function apiPath(path: string): string {
@@ -52,13 +52,15 @@ function unwrapApiData<T>(response: any): T {
 
 function normalizeProduct(raw: any): Product {
   const images = Array.isArray(raw?.images) ? raw.images : [];
-  const imageMetadata = images
-    .filter((image: any) => image && typeof image === 'object' && typeof image.url === 'string')
-    .map((image: any, index: number) => ({
-      url: image.url,
-      publicId: image.publicId,
-      isPrimary: index === 0
-    }));
+  const imageMetadata = Array.isArray(raw?.imageMetadata)
+    ? raw.imageMetadata
+    : images
+        .filter((image: any) => image && typeof image === 'object' && typeof image.url === 'string')
+        .map((image: any, index: number) => ({
+          url: image.url,
+          publicId: image.publicId,
+          isPrimary: index === 0
+        }));
   return {
     ...raw,
     images: images.map((image: any) => typeof image === 'string' ? image : image?.url).filter(Boolean),
@@ -166,8 +168,8 @@ function normalizeBaseUrl(raw: string | null | undefined): string | null {
 }
 
 /**
- * Use the deployed backend unless a local-storage override or
- * VITE_API_BASE_URL selects another API.
+ * Use the deployed backend unless a local-storage override or API_BASE_URL
+ * selects another API.
  */
 function readStoredBaseUrl(): string | null {
   try {
@@ -181,7 +183,7 @@ export function getApiBaseUrl(): string {
   const custom = normalizeBaseUrl(readStoredBaseUrl());
   if (custom) return custom;
 
-  const envUrl = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL as string | undefined);
+  const envUrl = normalizeBaseUrl(import.meta.env.API_BASE_URL as string | undefined);
   if (envUrl) return envUrl;
 
   return DEFAULT_API_BASE_URL;
@@ -237,6 +239,7 @@ interface RequestOptions {
    */
   auth?: 'auto' | 'admin' | 'customer';
   timeoutMs?: number;
+  deduplicate?: boolean;
 }
 
 async function resolveAuthToken(mode: 'auto' | 'admin' | 'customer'): Promise<string | null> {
@@ -272,10 +275,11 @@ async function httpRequest<T>(endpoint: string, options: RequestOptions = {}): P
   }
 
   const finalUrl = urlObj.toString();
-  const requestKey = `${method}:${finalUrl}:${options.body ? JSON.stringify(options.body) : ''}`;
+  const isBinaryBody = typeof Blob !== 'undefined' && options.body instanceof Blob;
+  const requestKey = `${method}:${finalUrl}:${isBinaryBody ? `binary:${crypto.randomUUID()}` : options.body ? JSON.stringify(options.body) : ''}`;
 
   // Prevent duplicate concurrent in-flight submissions for identical mutating requests
-  if (method !== 'GET' && pendingRequests.has(requestKey)) {
+  if (method !== 'GET' && options.deduplicate !== false && pendingRequests.has(requestKey)) {
     return pendingRequests.get(requestKey) as Promise<T>;
   }
 
@@ -284,8 +288,10 @@ async function httpRequest<T>(endpoint: string, options: RequestOptions = {}): P
       ...(options.headers || {})
     };
 
-    if (options.body && !(options.body instanceof FormData)) {
+    if (options.body && !(options.body instanceof FormData) && !isBinaryBody) {
       headers['Content-Type'] = 'application/json';
+    } else if (isBinaryBody && options.body.type) {
+      headers['Content-Type'] = options.body.type;
     }
 
     // Attach the credential appropriate for the request type.
@@ -315,7 +321,7 @@ async function httpRequest<T>(endpoint: string, options: RequestOptions = {}): P
         method,
         headers,
         credentials: 'omit',
-        body: options.body instanceof FormData ? options.body : options.body ? JSON.stringify(options.body) : undefined,
+        body: options.body instanceof FormData || isBinaryBody ? options.body : options.body ? JSON.stringify(options.body) : undefined,
         signal: controller.signal
       });
     } catch (networkErr: any) {
@@ -387,7 +393,7 @@ async function httpRequest<T>(endpoint: string, options: RequestOptions = {}): P
   };
 
   const promise = execRequest();
-  if (method !== 'GET') {
+  if (method !== 'GET' && options.deduplicate !== false && !isBinaryBody) {
     pendingRequests.set(requestKey, promise);
     // Attach a no-op rejection handler before finally() so a failed request does
     // not surface as an unhandled promise rejection.
@@ -431,6 +437,69 @@ export const api = {
   // -----------------------------------------------------------------------
   // PRODUCT ENDPOINTS (PREFIX: /api/v1)
   // -----------------------------------------------------------------------
+
+  getDemoProducts: async (): Promise<{ products: Product[] }> => {
+    const response = await httpRequest<any>(apiPath('/demo-products'), {
+      params: { includeInactive: true, limit: 100 },
+      requiresAuth: true,
+      auth: 'admin'
+    });
+    const raw = unwrapApiData<any>(response);
+    return {
+      products: (Array.isArray(raw) ? raw : Array.isArray(raw?.products) ? raw.products : [])
+        .map(normalizeProduct)
+    };
+  },
+
+  getDemoProduct: async (id: string): Promise<{ product: Product }> => {
+    const response = await httpRequest<any>(apiPath(`/demo-products/${encodeURIComponent(id)}`), {
+      requiresAuth: true,
+      auth: 'admin'
+    });
+    const raw = unwrapApiData<any>(response);
+    return { product: normalizeProduct(raw?.product || raw?.data || raw) };
+  },
+
+  createDemoProduct: async (payload: Partial<Product>): Promise<{ product: Product }> => {
+    const response = await httpRequest<any>(apiPath('/demo-products'), {
+      method: 'POST',
+      body: serializeProduct(payload),
+      requiresAuth: true,
+      auth: 'admin'
+    });
+    const raw = unwrapApiData<any>(response);
+    return { product: normalizeProduct(raw?.product || raw?.data || raw) };
+  },
+
+  updateDemoProduct: async (id: string, payload: Partial<Product>): Promise<{ product: Product }> => {
+    const response = await httpRequest<any>(apiPath(`/demo-products/${encodeURIComponent(id)}`), {
+      method: 'PATCH',
+      body: serializeProduct(payload),
+      requiresAuth: true,
+      auth: 'admin'
+    });
+    const raw = unwrapApiData<any>(response);
+    return { product: normalizeProduct(raw?.product || raw?.data || raw) };
+  },
+
+  updateDemoProductStatus: async (id: string, isActive: boolean): Promise<{ product: Product }> => {
+    const response = await httpRequest<any>(apiPath(`/demo-products/${encodeURIComponent(id)}/status`), {
+      method: 'PATCH',
+      body: { isActive },
+      requiresAuth: true,
+      auth: 'admin'
+    });
+    const raw = unwrapApiData<any>(response);
+    return { product: normalizeProduct(raw?.product || raw?.data || raw) };
+  },
+
+  archiveDemoProduct: async (id: string): Promise<void> => {
+    await httpRequest(apiPath(`/demo-products/${encodeURIComponent(id)}`), {
+      method: 'DELETE',
+      requiresAuth: true,
+      auth: 'admin'
+    });
+  },
 
   /**
    * List products with search, category, status, stock, sorting, pagination
@@ -676,10 +745,9 @@ export const api = {
   // IMAGE UPLOAD & DELETION ENDPOINTS (proxied through the API server)
   // -----------------------------------------------------------------------
 
-  /** Uploads directly to Cloudinary using a short-lived server signature. */
+  /** Uploads a file through the authenticated API, which streams it to Cloudinary server-side. */
   uploadProductImage: async (
-    file: File | Blob,
-    folder?: string
+    file: File | Blob
   ): Promise<{
     url: string;
     secureUrl: string;
@@ -689,42 +757,28 @@ export const api = {
     height?: number;
     bytes?: number;
   }> => {
-    const response = await httpRequest<any>(apiPath('/uploads/signature'), {
+    if (typeof Blob === 'undefined' || !(file instanceof Blob)) {
+      throw new ApiError('A valid image file is required for upload.', 400, 'INVALID_IMAGE');
+    }
+
+    const response = await httpRequest<any>(apiPath('/uploads/product-image'), {
       method: 'POST',
+      body: file,
       requiresAuth: true,
       auth: 'admin',
-      timeoutMs: 60000
+      timeoutMs: 60000,
+      deduplicate: false
     });
 
-    const signature = unwrapApiData<any>(response);
-    if (!signature?.uploadUrl || !signature?.signature || !signature?.apiKey) {
-      throw new ApiError('The image-signature endpoint returned incomplete upload details.', 502, 'UPLOAD_SIGNATURE_INVALID', signature);
-    }
-    if (file.size > signature.maxBytes) {
-      throw new ApiError(`The selected image exceeds the ${Math.floor(signature.maxBytes / 1024 / 1024)} MiB upload limit.`, 413, 'UPLOAD_TOO_LARGE');
-    }
-    if (folder && folder !== signature.folder) {
-      throw new ApiError('The requested upload folder does not match the server-configured product folder.', 400, 'INVALID_UPLOAD_FOLDER');
-    }
-
-    const form = new FormData();
-    form.append('file', file, typeof File !== 'undefined' && file instanceof File ? file.name : 'product-image');
-    form.append('api_key', signature.apiKey);
-    form.append('timestamp', String(signature.timestamp));
-    form.append('folder', signature.folder);
-    form.append('allowed_formats', (signature.allowedFormats || []).join(','));
-    form.append('upload_preset', signature.uploadPreset);
-    form.append('signature', signature.signature);
-    const uploadResponse = await fetch(signature.uploadUrl, { method: 'POST', body: form });
-    const uploaded = await uploadResponse.json().catch(() => ({}));
-    if (!uploadResponse.ok) {
-      const message = uploaded?.error?.message || `Cloudinary upload failed with HTTP ${uploadResponse.status}.`;
-      throw new ApiError(message, uploadResponse.status, 'UPLOAD_FAILED', uploaded);
+    const uploaded = unwrapApiData<any>(response);
+    if (typeof uploaded?.secureUrl !== 'string' || !uploaded.secureUrl.startsWith('https://res.cloudinary.com/') ||
+        typeof uploaded.publicId !== 'string') {
+      throw new ApiError('The upload API returned invalid Cloudinary product image details.', 502, 'UPLOAD_RESPONSE_INVALID');
     }
     return {
-      url: uploaded.secure_url,
-      secureUrl: uploaded.secure_url,
-      publicId: uploaded.public_id,
+      url: uploaded.secureUrl,
+      secureUrl: uploaded.secureUrl,
+      publicId: uploaded.publicId,
       format: uploaded.format,
       width: uploaded.width,
       height: uploaded.height,

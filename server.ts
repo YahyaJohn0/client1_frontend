@@ -1654,7 +1654,7 @@ async function startServer() {
     }
     if (!FIREBASE_PROJECT_ID) {
       console.warn(
-        '   WARNING: VITE_FIREBASE_PROJECT_ID is missing, so Firebase sign-in cannot be verified.'
+        '   WARNING: FIREBASE_PROJECT_ID is missing, so Firebase sign-in cannot be verified.'
       );
     }
     if (!ALLOW_LOCAL_ADMIN && ADMIN_UIDS.size === 0) {

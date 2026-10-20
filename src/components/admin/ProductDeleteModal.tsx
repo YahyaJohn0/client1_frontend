@@ -26,8 +26,7 @@ export const ProductDeleteModal: React.FC<ProductDeleteModalProps> = ({
     setIsProcessing(true);
     setErrorMessage(null);
     try {
-      // Connect to DELETE /api/v1/products/:id which safely archives the product
-      await api.archiveProduct(product.id);
+      await api.archiveDemoProduct(product.id);
       onSuccess(`"${product.name}" has been successfully archived and deactivated from the storefront.`);
       onClose();
     } catch (err: any) {
@@ -76,7 +75,7 @@ export const ProductDeleteModal: React.FC<ProductDeleteModalProps> = ({
           <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-2">
             <p className="font-semibold flex items-center gap-1.5">
               <Archive className="w-4 h-4 text-amber-700 shrink-0" />
-              Product Archival (DELETE /api/v1/products/:id)
+              Product Archival (Firebase Realtime Database)
             </p>
             <p className="text-[11px] leading-relaxed text-amber-800">
               Archiving <strong>&ldquo;{product.name}&rdquo;</strong> deactivates it from the active storefront catalog while preserving existing customer orders, packing slips, and historical reports intact.

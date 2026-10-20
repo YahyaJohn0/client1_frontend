@@ -121,7 +121,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
     }
   };
 
-  const firebaseProjectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || '';
+  const firebaseProjectId = import.meta.env.FIREBASE_PROJECT_ID || '';
 
   return (
     <div className="min-h-[85vh] flex items-center justify-center px-4 py-12">

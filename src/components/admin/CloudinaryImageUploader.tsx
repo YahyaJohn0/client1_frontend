@@ -23,8 +23,8 @@ interface CloudinaryImageUploaderProps {
   maxSizeMB?: number;
 }
 
-const MAX_IMAGE_SIZE_MB = 10;
-const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/avif', 'image/gif'];
+const MAX_IMAGE_SIZE_MB = 5;
+const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/avif'];
 
 export const CloudinaryImageUploader: React.FC<CloudinaryImageUploaderProps> = ({
   images,
@@ -38,16 +38,14 @@ export const CloudinaryImageUploader: React.FC<CloudinaryImageUploaderProps> = (
   const [generalError, setGeneralError] = useState<string | null>(null);
 
   /**
-   * Uploads a single image through the API server (`POST /api/admin/cloudinary/upload`).
-   * Keeping the upload server-side means Cloudinary credentials never reach the
-   * browser, and the bundled server can fall back to local storage when
-   * Cloudinary is not configured.
+   * Uploads a single image through the authenticated API, which streams it to
+   * Cloudinary using server-side credentials.
    */
   const uploadSingleImage = async (item: UploadedImageItem): Promise<UploadedImageItem> => {
     if (!item.file) return item;
 
     try {
-      const uploaded = await api.uploadProductImage(item.file, 'zamzam/products');
+      const uploaded = await api.uploadProductImage(item.file);
 
       return {
         ...item,
@@ -108,7 +106,7 @@ export const CloudinaryImageUploader: React.FC<CloudinaryImageUploaderProps> = (
     const initialList = [...images, ...newItems];
     onChange(initialList);
 
-    // Concurrently upload images to Cloudinary via backend signature
+    // Upload images through the authenticated backend to Cloudinary.
     const finalItems = await Promise.all(
       initialList.map(async (img) => {
         if (img.status === 'uploading' && img.file) {

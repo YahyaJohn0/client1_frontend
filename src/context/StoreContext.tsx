@@ -3,7 +3,11 @@ import type { Product, Category, StoreSettings, Order } from '../types/store.ts'
 import type { CartItem, Coupon } from '../utils/pricing.ts';
 import { calculateOrderPricing } from '../utils/pricing.ts';
 import { api } from '../services/api.ts';
-import { auth, customerSignOut as fbCustomerSignOut } from '../services/firebase.ts';
+import {
+  auth,
+  customerSignOut as fbCustomerSignOut,
+  getPublishedDemoProducts
+} from '../services/firebase.ts';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 
 interface Toast {
@@ -212,17 +216,29 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [wishlist]);
 
   const refreshProducts = async () => {
+    setIsLoading(true);
     try {
-      const [prodsRes, catsRes, setsRes] = await Promise.all([
-        api.getProducts(),
+      const [prodsRes, catsRes, setsRes] = await Promise.allSettled([
+        getPublishedDemoProducts(),
         api.getCategories(),
         api.getSettings()
       ]);
-      setProducts(prodsRes.products);
-      setCategories(catsRes.categories);
-      setSettings(setsRes.settings);
-    } catch (err: any) {
-      console.error('Failed to load store catalog:', err);
+
+      if (prodsRes.status === 'fulfilled') {
+        setProducts(prodsRes.value);
+      } else {
+        console.error('Failed to load published products from Firebase Realtime Database:', prodsRes.reason);
+      }
+      if (catsRes.status === 'fulfilled') {
+        setCategories(catsRes.value.categories);
+      } else {
+        console.error('Failed to load categories from the API:', catsRes.reason);
+      }
+      if (setsRes.status === 'fulfilled') {
+        setSettings(setsRes.value.settings);
+      } else {
+        console.error('Failed to load store settings from the API:', setsRes.reason);
+      }
     } finally {
       setIsLoading(false);
     }

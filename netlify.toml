@@ -1,2 +1,11 @@
 [build.environment]
-  SECRETS_SCAN_ENABLED = "false"
+  NODE_VERSION = "22"
+
+[build]
+  command = "bun run build"
+  publish = "dist"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

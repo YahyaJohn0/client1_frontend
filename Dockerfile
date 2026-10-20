@@ -1,12 +1,14 @@
 # syntax=docker/dockerfile:1
 # Production image for the Zamzam storefront + API server.
 #
-# Build (Vite bakes VITE_* values into the SPA):
+# Build (Vite explicitly embeds only public Firebase/API values):
 #   docker build \
-#     --build-arg VITE_FIREBASE_API_KEY=... \
-#     --build-arg VITE_FIREBASE_AUTH_DOMAIN=... \
-#     --build-arg VITE_FIREBASE_PROJECT_ID=... \
-#     --build-arg VITE_FIREBASE_APP_ID=... \
+#     --build-arg FIREBASE_API_KEY=... \
+#     --build-arg FIREBASE_AUTH_DOMAIN=... \
+#     --build-arg FIREBASE_DATABASE_URL=... \
+#     --build-arg FIREBASE_PROJECT_ID=... \
+#     --build-arg FIREBASE_APP_ID=... \
+#     --build-arg API_BASE_URL=... \
 #     -t zamzam-store .
 #
 # Run (mount a persistent volume; set the same Firebase project at runtime so the
@@ -22,17 +24,20 @@
 FROM node:22-bookworm-slim AS build
 WORKDIR /app
 
-# Public client configuration is embedded at build time by Vite.
-ARG VITE_FIREBASE_API_KEY=""
-ARG VITE_FIREBASE_AUTH_DOMAIN=""
-ARG VITE_FIREBASE_PROJECT_ID=""
-ARG VITE_FIREBASE_APP_ID=""
-ARG VITE_API_BASE_URL=""
-ENV VITE_FIREBASE_API_KEY=$VITE_FIREBASE_API_KEY \
-    VITE_FIREBASE_AUTH_DOMAIN=$VITE_FIREBASE_AUTH_DOMAIN \
-    VITE_FIREBASE_PROJECT_ID=$VITE_FIREBASE_PROJECT_ID \
-    VITE_FIREBASE_APP_ID=$VITE_FIREBASE_APP_ID \
-    VITE_API_BASE_URL=$VITE_API_BASE_URL
+# Public client configuration is embedded at build time by Vite's explicit
+# allowlist. Do not pass server credentials as build arguments.
+ARG FIREBASE_API_KEY=""
+ARG FIREBASE_AUTH_DOMAIN=""
+ARG FIREBASE_DATABASE_URL=""
+ARG FIREBASE_PROJECT_ID=""
+ARG FIREBASE_APP_ID=""
+ARG API_BASE_URL=""
+ENV FIREBASE_API_KEY=$FIREBASE_API_KEY \
+    FIREBASE_AUTH_DOMAIN=$FIREBASE_AUTH_DOMAIN \
+    FIREBASE_DATABASE_URL=$FIREBASE_DATABASE_URL \
+    FIREBASE_PROJECT_ID=$FIREBASE_PROJECT_ID \
+    FIREBASE_APP_ID=$FIREBASE_APP_ID \
+    API_BASE_URL=$API_BASE_URL
 
 # Install all dependencies (Vite/TypeScript are needed to build the SPA).
 COPY package.json package-lock.json ./

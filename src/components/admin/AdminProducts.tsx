@@ -73,12 +73,34 @@ export const AdminProducts: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [pRes, cRes] = await Promise.all([
-        api.getProducts({ includeInactive: true }),
+      const [productsResult, categoriesResult] = await Promise.allSettled([
+        api.getDemoProducts(),
         api.getCategories()
       ]);
-      setProducts(pRes.products);
-      setCategories(cRes.categories);
+      if (productsResult.status === 'rejected') throw productsResult.reason;
+
+      setProducts(productsResult.value.products);
+      if (categoriesResult.status === 'fulfilled' && categoriesResult.value.categories.length > 0) {
+        setCategories(categoriesResult.value.categories);
+      } else {
+        if (categoriesResult.status === 'rejected') {
+          console.warn('Could not load API categories; deriving available categories from demo products.', categoriesResult.reason);
+        }
+        const demoCategories = new Map<string, Category>();
+        productsResult.value.products.forEach(product => {
+          if (!product.categoryId || demoCategories.has(product.categoryId)) return;
+          const name = product.categoryId;
+          demoCategories.set(product.categoryId, {
+            id: product.categoryId,
+            name,
+            slug: product.categoryId.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+            description: '',
+            displayOrder: demoCategories.size,
+            isActive: true
+          });
+        });
+        setCategories([...demoCategories.values()]);
+      }
     } catch (err: any) {
       console.error(err);
       showToast(err.message || 'Failed to load products', 'error');
@@ -186,15 +208,7 @@ export const AdminProducts: React.FC = () => {
       isActive: true
     });
 
-    // Provide default starter image in list
-    setFormImages([
-      {
-        id: `init-${Date.now()}`,
-        url: DEFAULT_IMAGES[0],
-        status: 'ready',
-        isPrimary: true
-      }
-    ]);
+    setFormImages([]);
 
     setIsModalOpen(true);
   };
@@ -220,7 +234,7 @@ export const AdminProducts: React.FC = () => {
     });
 
     const populateImages = (prod: Product) => {
-      const existingImages: UploadedImageItem[] = (prod.images && prod.images.length > 0 ? prod.images : [DEFAULT_IMAGES[0]]).map((url, idx) => {
+      const existingImages: UploadedImageItem[] = (prod.images || []).map((url, idx) => {
         const meta = prod.imageMetadata?.find(m => m.url === url);
         return {
           id: `img-${idx}-${Date.now()}`,
@@ -237,9 +251,9 @@ export const AdminProducts: React.FC = () => {
     populateImages(p);
     setIsModalOpen(true);
 
-    // Fetch fresh product data from GET /api/v1/products/:id
+    // Fetch fresh product data from the Firebase Realtime Database demo catalog.
     try {
-      const res = await api.getProduct(p.id);
+      const res = await api.getDemoProduct(p.id);
       if (res.product) {
         setEditingProduct(res.product);
         setFormData({
@@ -363,10 +377,9 @@ export const AdminProducts: React.FC = () => {
 
       if (editingProduct) {
         // PATCH /api/v1/products/:id
-        await api.updateProduct(editingProduct.id, payload);
+        await api.updateDemoProduct(editingProduct.id, payload);
       } else {
-        // POST /api/v1/products
-        await api.createProduct(payload);
+        await api.createDemoProduct(payload);
       }
 
       // Clean up any Cloudinary images that were explicitly removed during edit
@@ -390,7 +403,7 @@ export const AdminProducts: React.FC = () => {
   const handleToggleActive = async (product: Product) => {
     try {
       // PATCH /api/v1/products/:id/status
-      await api.updateProductStatus(product.id, !product.isActive);
+      await api.updateDemoProductStatus(product.id, !product.isActive);
       await loadData();
       await refreshProducts();
       showToast(`Product "${product.name}" marked as ${!product.isActive ? 'Active' : 'Inactive'}`, 'success');
@@ -403,7 +416,7 @@ export const AdminProducts: React.FC = () => {
     const newStock = Math.max(0, product.stock + delta);
     try {
       // PATCH /api/v1/products/:id
-      await api.updateProduct(product.id, { stock: newStock });
+      await api.updateDemoProduct(product.id, { stock: newStock });
       await loadData();
       await refreshProducts();
       showToast(`Stock updated to ${newStock} for "${product.name}"`, 'success');
@@ -431,7 +444,7 @@ export const AdminProducts: React.FC = () => {
     if (selectedProductIds.length === 0) return;
     setIsBulkProcessing(true);
     try {
-      await Promise.all(selectedProductIds.map(id => api.updateProductStatus(id, activate)));
+      await Promise.all(selectedProductIds.map(id => api.updateDemoProductStatus(id, activate)));
       showToast(`Updated ${selectedProductIds.length} products to ${activate ? 'Active' : 'Inactive'}.`, 'success');
       setSelectedProductIds([]);
       await loadData();
@@ -447,7 +460,7 @@ export const AdminProducts: React.FC = () => {
     if (selectedProductIds.length === 0 || !bulkActionCategory) return;
     setIsBulkProcessing(true);
     try {
-      await Promise.all(selectedProductIds.map(id => api.updateProduct(id, { categoryId: bulkActionCategory })));
+      await Promise.all(selectedProductIds.map(id => api.updateDemoProduct(id, { categoryId: bulkActionCategory })));
       showToast(`Assigned ${selectedProductIds.length} products to category.`, 'success');
       setSelectedProductIds([]);
       setBulkActionCategory('');
