@@ -1,5 +1,8 @@
 [build.environment]
   NODE_VERSION = "22"
+  # Public browser configuration and non-secret runtime settings only.
+  # Keep scanning enabled for all files and other environment variables.
+  SECRETS_SCAN_OMIT_KEYS = "FIREBASE_API_KEY,FIREBASE_AUTH_DOMAIN,FIREBASE_DATABASE_URL,FIREBASE_PROJECT_ID,FIREBASE_APP_ID,API_BASE_URL,LOG_LEVEL,NODE_ENV,PORT,CLOUDINARY_UPLOAD_PRESET"
 
 [build]
   command = "bun run build"

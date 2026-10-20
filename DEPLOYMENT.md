@@ -34,7 +34,7 @@ Netlify can serve the storefront's static Vite bundle; it does not run either Ex
 
 Firebase web configuration and a Firebase project ID are public client configuration, not authentication credentials. Vite explicitly embeds only the Firebase web values and `API_BASE_URL`; do not put Firebase service-account JSON/private keys, Cloudinary API secrets/`CLOUDINARY_URL`, administrator passwords, or signing/HMAC secrets in frontend build variables. Firebase Authentication, Realtime Database rules, Firestore rules for private commerce data, and server-side administrator authorization still need to be configured correctly.
 
-Keep Netlify secrets scanning enabled. Do not set `SECRETS_SCAN_ENABLED=false` or omit paths or source directories from scanning.
+Keep Netlify secrets scanning enabled. `netlify.toml` excludes only the public Firebase browser configuration, public API base URL, and the non-secret `LOG_LEVEL`, `NODE_ENV`, `PORT`, and `CLOUDINARY_UPLOAD_PRESET` variables using `SECRETS_SCAN_OMIT_KEYS`. All files and other environment variables remain subject to scanning. Do not set `SECRETS_SCAN_ENABLED=false` or omit paths or source directories from scanning.
 
 ## Express service
 
