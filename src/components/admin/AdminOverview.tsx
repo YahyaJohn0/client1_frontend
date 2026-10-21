@@ -34,7 +34,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({ onNavigateTab, onS
       const orders = ordRes.orders || [];
       const products = prodRes.products || [];
 
-      // Authoritatively calculate metrics from real backend orders and products
+      // Calculate dashboard metrics from Firebase orders and products.
       const placed = orders.filter(o => o.fulfillmentStatus === 'placed').length;
       const confirmed = orders.filter(o => o.fulfillmentStatus === 'confirmed').length;
       const processing = orders.filter(o => o.fulfillmentStatus === 'processing' || o.fulfillmentStatus === 'packed').length;
@@ -85,7 +85,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({ onNavigateTab, onS
       setReports(calculatedReports);
       setRecentOrders(orders.slice(0, 5));
     } catch (err) {
-      console.error('Failed to load dashboard metrics from backend:', err);
+      console.error('Failed to load dashboard metrics from Firebase:', err);
     } finally {
       setIsLoading(false);
     }

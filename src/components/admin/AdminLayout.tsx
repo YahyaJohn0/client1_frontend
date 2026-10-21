@@ -9,13 +9,6 @@ import {
   LogOut,
   ExternalLink,
   ShieldCheck,
-  Activity,
-  CheckCircle2,
-  AlertTriangle,
-  XCircle,
-  RefreshCw,
-  Settings,
-  X,
   KeyRound
 } from 'lucide-react';
 import { AdminLogin } from './AdminLogin.tsx';
@@ -29,9 +22,6 @@ import { AdminAudit } from './AdminAudit.tsx';
 import {
   api,
   ApiError,
-  getApiBaseUrl,
-  getApiBaseUrlOverride,
-  setApiBaseUrl,
   type AdminIdentity
 } from '../../services/api.ts';
 import { onAdminAuthStateChanged, adminSignOut } from '../../services/firebase.ts';
@@ -40,12 +30,7 @@ import { useStore } from '../../context/StoreContext.tsx';
 
 interface HealthStatus {
   isChecking: boolean;
-  isLive: boolean;
   isReady: boolean;
-  lastChecked: Date | null;
-  errorMessage?: string;
-  livenessData?: any;
-  readinessData?: any;
 }
 
 export const AdminLayout: React.FC = () => {
@@ -59,21 +44,14 @@ export const AdminLayout: React.FC = () => {
   >('overview');
   const [selectedOrderForManagement, setSelectedOrderForManagement] = useState<Order | null>(null);
 
-  // Health and connection state
   const [health, setHealth] = useState<HealthStatus>({
     isChecking: false,
-    isLive: false,
-    isReady: false,
-    lastChecked: null
+    isReady: false
   });
-  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
-  const [tempBaseUrl, setTempBaseUrl] = useState(getApiBaseUrl());
-  const [testResult, setTestResult] = useState<string | null>(null);
 
   /**
-   * The backend is the only authority on administrator access. The UI opens
-   * only after GET /api/admin/me confirms an authorized administrator session;
-   * nothing stored in the browser grants access.
+   * Admin access is checked against Firebase Authentication and the Firebase
+   * administrator allowlist before the console is shown.
    */
   const refreshAdmin = useCallback(async (): Promise<AdminIdentity | null> => {
     try {
@@ -110,37 +88,13 @@ export const AdminLayout: React.FC = () => {
 
   const checkHealth = useCallback(async () => {
     setHealth(prev => ({ ...prev, isChecking: true }));
-    let live = false;
-    let ready = false;
-    let liveData: any = null;
-    let readyData: any = null;
-    let errorMsg: string | undefined = undefined;
-
     try {
-      liveData = await api.checkLiveness();
-      live = true;
+      await api.checkReadiness();
+      setHealth({ isChecking: false, isReady: true });
     } catch (err: any) {
-      errorMsg = err.message || 'Liveness check failed';
+      setHealth({ isChecking: false, isReady: false });
+      console.error('Firebase connection check failed:', err);
     }
-
-    if (live) {
-      try {
-        readyData = await api.checkReadiness();
-        ready = true;
-      } catch (err: any) {
-        errorMsg = err.message || 'Readiness check failed';
-      }
-    }
-
-    setHealth({
-      isChecking: false,
-      isLive: live,
-      isReady: ready,
-      lastChecked: new Date(),
-      errorMessage: errorMsg,
-      livenessData: liveData,
-      readinessData: readyData
-    });
   }, []);
 
   useEffect(() => {
@@ -150,13 +104,6 @@ export const AdminLayout: React.FC = () => {
   }, [checkHealth]);
 
   const handleLogout = async () => {
-    // Revoke the server-side session (when one exists), then sign out the
-    // dedicated administrator Firebase app. Customer authentication is kept.
-    try {
-      await api.adminLogout();
-    } catch (e) {
-      console.error('Backend logout error:', e);
-    }
     try {
       await adminSignOut();
     } catch (e) {
@@ -174,27 +121,6 @@ export const AdminLayout: React.FC = () => {
     setDeniedUid(undefined);
     setIsCheckingAuth(false);
     setActiveAdminTab(identity.mustChangePassword ? 'security' : 'overview');
-  };
-
-  const handleSaveApiUrl = () => {
-    setApiBaseUrl(tempBaseUrl.trim());
-    setIsConfigModalOpen(false);
-    setTestResult(null);
-    checkHealth();
-  };
-
-  const handleTestUrl = async () => {
-    setTestResult('Testing connection...');
-    const originalOverride = getApiBaseUrlOverride();
-    try {
-      setApiBaseUrl(tempBaseUrl.trim());
-      const live = await api.checkLiveness();
-      setTestResult(`Success! Backend responded: ${JSON.stringify(live)}`);
-    } catch (err: any) {
-      // A failed probe must not leave the portal pointed at an unreachable API.
-      setApiBaseUrl(originalOverride);
-      setTestResult(`Connection failed: ${err.message}`);
-    }
   };
 
   if (isCheckingAuth) {
@@ -287,36 +213,31 @@ export const AdminLayout: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Backend Health Connection Indicator */}
             <button
               onClick={() => {
-                setTempBaseUrl(getApiBaseUrl());
-                setTestResult(null);
-                setIsConfigModalOpen(true);
+                checkHealth();
               }}
-              title="Click to view backend connection & health diagnostics"
+              title="Check backend and MongoDB-compatible Firestore connection"
               className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-                health.isLive && health.isReady
+                health.isReady
                   ? 'bg-emerald-950/60 border-emerald-800/80 text-emerald-300 hover:bg-emerald-900/80'
-                  : health.isLive
-                  ? 'bg-amber-950/60 border-amber-800/80 text-amber-300 hover:bg-amber-900/80'
                   : 'bg-rose-950/60 border-rose-800/80 text-rose-300 hover:bg-rose-900/80'
               }`}
             >
               <span className="relative flex h-2 w-2">
                 <span
                   className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                    health.isLive && health.isReady ? 'bg-emerald-400' : health.isLive ? 'bg-amber-400' : 'bg-rose-400'
+                    health.isReady ? 'bg-emerald-400' : 'bg-rose-400'
                   }`}
                 />
                 <span
                   className={`relative inline-flex rounded-full h-2 w-2 ${
-                    health.isLive && health.isReady ? 'bg-emerald-500' : health.isLive ? 'bg-amber-500' : 'bg-rose-500'
+                    health.isReady ? 'bg-emerald-500' : 'bg-rose-500'
                   }`}
                 />
               </span>
               <span className="hidden sm:inline">
-                {health.isLive && health.isReady ? 'Backend Ready' : health.isLive ? 'Backend Live' : 'Backend Offline'}
+                {health.isChecking ? 'Checking Database' : health.isReady ? 'Database Ready' : 'Database Offline'}
               </span>
             </button>
 
@@ -461,152 +382,6 @@ export const AdminLayout: React.FC = () => {
         )}
       </main>
 
-      {/* Backend API Configuration & Health Modal */}
-      {isConfigModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-100 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="p-5 border-b border-slate-100 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="p-2 bg-amber-50 text-amber-700 rounded-xl">
-                  <Activity className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-heading text-sm font-bold text-slate-900">
-                    Backend Connection & Health Diagnostics
-                  </h3>
-                  <p className="text-[11px] text-slate-500">
-                    Liveness (/health/live) & Readiness (/health/ready)
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsConfigModalOpen(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="p-5 space-y-4">
-              {/* Health Status Box */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className={`p-3 rounded-xl border ${
-                  health.isLive ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-rose-50 border-rose-200 text-rose-900'
-                }`}>
-                  <div className="flex items-center gap-1.5 mb-1">
-                    {health.isLive ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <XCircle className="w-4 h-4 text-rose-600" />}
-                    <span className="text-xs font-bold">Liveness Check</span>
-                  </div>
-                  <p className="text-[11px]">
-                    {health.isLive ? 'Process responding OK' : 'Process offline or unreachable'}
-                  </p>
-                </div>
-
-                <div className={`p-3 rounded-xl border ${
-                  health.isReady ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'
-                }`}>
-                  <div className="flex items-center gap-1.5 mb-1">
-                    {health.isReady ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <AlertTriangle className="w-4 h-4 text-amber-600" />}
-                    <span className="text-xs font-bold">Readiness Check</span>
-                  </div>
-                  <p className="text-[11px]">
-                    {health.isReady ? 'Database & dependencies ready' : 'Dependencies pending/offline'}
-                  </p>
-                </div>
-              </div>
-
-              {health.errorMessage && (
-                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 flex items-start gap-2">
-                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-semibold block">Connection Diagnostic:</span>
-                    <span className="text-[11px]">{health.errorMessage}</span>
-                  </div>
-                </div>
-              )}
-
-              {/* API Base URL Configuration */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Backend Base URL Override
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={tempBaseUrl}
-                    onChange={(e) => setTempBaseUrl(e.target.value)}
-                    placeholder="Same origin — leave empty to use the bundled API"
-                    className="flex-1 px-3 py-2 text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleTestUrl}
-                    className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
-                  >
-                    Test
-                  </button>
-                </div>
-                <p className="text-[10px] text-slate-400 mt-1">
-                  By default the storefront calls the API on the same origin that served this page (the bundled server on port 3000). Set a URL only when the API is hosted elsewhere; a trailing <code>/api/v1</code> is accepted and normalized.
-                </p>
-              </div>
-
-              {testResult && (
-                <div className="p-2.5 bg-slate-100 rounded-xl text-[11px] font-mono text-slate-800 break-all">
-                  {testResult}
-                </div>
-              )}
-
-              {/* Verified Administrator Session */}
-              <div className="p-3 bg-slate-50 rounded-xl text-xs space-y-1">
-                <span className="font-semibold text-slate-700 block">Verified Administrator Session</span>
-                <p className="text-slate-600 text-[11px]">
-                  Account: <span className="font-mono text-slate-900">{adminUser.email || adminUser.identifier}</span>
-                </p>
-                <p className="text-slate-600 text-[11px]">
-                  Provider: <span className="font-mono text-slate-900">{adminUser.provider === 'firebase' ? 'Firebase Authentication' : 'Local recovery account'}</span>
-                </p>
-                {adminUser.uid && (
-                  <p className="text-slate-600 text-[11px]">
-                    UID: <span className="font-mono text-slate-900 break-all">{adminUser.uid}</span>
-                  </p>
-                )}
-                <p className="text-slate-600 text-[11px]">
-                  Authorization: the API verifies this identity and the administrator allowlist on every request. No role is trusted from the browser.
-                </p>
-              </div>
-            </div>
-
-            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => checkHealth()}
-                className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 flex items-center gap-1.5 cursor-pointer"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${health.isChecking ? 'animate-spin' : ''}`} />
-                <span>Recheck Health</span>
-              </button>
-
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsConfigModalOpen(false)}
-                  className="px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSaveApiUrl}
-                  className="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl cursor-pointer"
-                >
-                  Save URL
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

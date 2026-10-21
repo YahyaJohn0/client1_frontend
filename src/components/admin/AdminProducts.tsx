@@ -84,7 +84,7 @@ export const AdminProducts: React.FC = () => {
         setCategories(categoriesResult.value.categories);
       } else {
         if (categoriesResult.status === 'rejected') {
-          console.warn('Could not load API categories; deriving available categories from demo products.', categoriesResult.reason);
+          console.warn('Could not load Firebase categories; deriving available categories from products.', categoriesResult.reason);
         }
         const demoCategories = new Map<string, Category>();
         productsResult.value.products.forEach(product => {
@@ -274,7 +274,7 @@ export const AdminProducts: React.FC = () => {
         populateImages(res.product);
       }
     } catch (err) {
-      console.warn('Could not refresh product details from /api/v1/products/:id:', err);
+      console.warn('Could not refresh product details from Firebase:', err);
     }
   };
 
@@ -376,7 +376,6 @@ export const AdminProducts: React.FC = () => {
       };
 
       if (editingProduct) {
-        // PATCH /api/v1/products/:id
         await api.updateDemoProduct(editingProduct.id, payload);
       } else {
         await api.createDemoProduct(payload);
@@ -402,7 +401,6 @@ export const AdminProducts: React.FC = () => {
 
   const handleToggleActive = async (product: Product) => {
     try {
-      // PATCH /api/v1/products/:id/status
       await api.updateDemoProductStatus(product.id, !product.isActive);
       await loadData();
       await refreshProducts();
@@ -415,7 +413,6 @@ export const AdminProducts: React.FC = () => {
   const handleQuickStockUpdate = async (product: Product, delta: number) => {
     const newStock = Math.max(0, product.stock + delta);
     try {
-      // PATCH /api/v1/products/:id
       await api.updateDemoProduct(product.id, { stock: newStock });
       await loadData();
       await refreshProducts();

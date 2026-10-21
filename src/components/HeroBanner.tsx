@@ -19,13 +19,16 @@ export const HeroBanner: React.FC = () => {
 
   const banner = banners[currentIndex] || {
     id: 'default',
-    title: 'Salon-Grade Styling At Home',
+    title: 'Zamzam Trade & Company',
     subtitle: 'Discover our signature thermal hairbrushes, cushion paddles & vanity organizers.',
     badgeText: 'New Collection',
     imageUrl: '/src/assets/images/hero_lifestyle_store_1792058412869.jpg',
     ctaText: 'Shop Collection',
     linkUrl: '#collection'
   };
+  const title = banner.title === 'Salon-Grade Styling At Home'
+    ? 'Zamzam Trade & Company'
+    : banner.title;
 
   const handleCta = () => {
     setSelectedCategory('all');
@@ -39,7 +42,7 @@ export const HeroBanner: React.FC = () => {
         <div className="absolute inset-0 z-0">
           <img
             src={banner.imageUrl}
-            alt={banner.title}
+            alt={title}
             className="w-full h-full object-cover object-center filter brightness-[0.88]"
             referrerPolicy="no-referrer"
           />
@@ -57,7 +60,7 @@ export const HeroBanner: React.FC = () => {
           )}
 
           <h1 className="font-heading text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight text-white leading-tight mb-2 sm:mb-3">
-            {banner.title}
+            {title}
           </h1>
 
           <p className="text-sm sm:text-base text-slate-200/90 mb-5 max-w-md leading-relaxed">

@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
-import { Search, Filter, SlidersHorizontal, ArrowUpDown, X } from 'lucide-react';
+import { Search, Filter, SlidersHorizontal, ArrowUpDown, X, RefreshCw } from 'lucide-react';
 import { useStore } from '../context/StoreContext.tsx';
 import { ProductCard } from './ProductCard.tsx';
 
 export const ShopCatalogView: React.FC = () => {
   const {
     products,
+    catalogError,
+    refreshProducts,
     categories,
     selectedCategory,
     setSelectedCategory,
@@ -142,7 +144,19 @@ export const ShopCatalogView: React.FC = () => {
       </div>
 
       {/* Product Grid */}
-      {filtered.length === 0 ? (
+      {catalogError ? (
+        <div role="alert" className="py-10 px-5 text-center max-w-2xl mx-auto border border-rose-200 bg-rose-50 rounded-2xl">
+          <h3 className="font-heading text-base font-bold text-rose-900 mb-2">Products could not be loaded</h3>
+          <p className="text-xs text-rose-800 mb-4">{catalogError}</p>
+          <button
+            onClick={() => void refreshProducts()}
+            className="px-4 py-2 bg-slate-900 text-white text-xs font-semibold rounded-xl inline-flex items-center gap-2"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Retry
+          </button>
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="py-16 text-center max-w-sm mx-auto">
           <div className="w-16 h-16 rounded-full bg-slate-100 mx-auto flex items-center justify-center mb-4 text-slate-400">
             <Search className="w-8 h-8" />

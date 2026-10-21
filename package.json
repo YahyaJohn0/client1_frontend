@@ -7,9 +7,8 @@
     "node": ">=22.18"
   },
   "scripts": {
-    "dev": "tsx server.ts",
-    "start": "node server.ts",
-    "start:tsx": "tsx server.ts",
+    "dev": "vite --host 0.0.0.0",
+    "start": "vite preview --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",

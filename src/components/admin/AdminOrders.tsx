@@ -54,12 +54,11 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({ initialSelectedOrder }
   const loadOrders = async () => {
     setIsLoading(true);
     try {
-      // GET /api/v1/orders
       const res = await api.getOrders({ status: statusFilter, search });
       setOrders(res.orders);
     } catch (err: any) {
       console.error('[Admin Orders Load Error]', err);
-      showToast(err.message || 'Failed to load orders from backend', 'error');
+      showToast(err.message || 'Failed to load orders from Firebase', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -83,7 +82,7 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({ initialSelectedOrder }
     setCancelReason(order.cancelReason || '');
     setInternalNotes(order.internalNotes || '');
 
-    // Fetch fresh order details from GET /api/v1/orders/:id
+    // Refresh the order details from Firebase before editing.
     try {
       const res = await api.getOrder(order.id);
       if (res.order) {
@@ -95,7 +94,7 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({ initialSelectedOrder }
         setInternalNotes(res.order.internalNotes || '');
       }
     } catch (err) {
-      console.warn('Could not refresh order details from /api/v1/orders/:id:', err);
+      console.warn('Could not refresh order details from Firebase:', err);
     }
   };
 
@@ -104,7 +103,6 @@ export const AdminOrders: React.FC<AdminOrdersProps> = ({ initialSelectedOrder }
     if (!selectedOrder) return;
     setIsSavingStatus(true);
     try {
-      // PATCH /api/v1/orders/:id/status
       const res = await api.updateOrderStatus(selectedOrder.id, updatingStatus, {
         trackingNumber: trackingNumber.trim() || undefined,
         courierName: courierName.trim() || undefined,

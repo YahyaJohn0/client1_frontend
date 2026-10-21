@@ -106,7 +106,7 @@ export const CloudinaryImageUploader: React.FC<CloudinaryImageUploaderProps> = (
     const initialList = [...images, ...newItems];
     onChange(initialList);
 
-    // Upload images through the authenticated backend to Cloudinary.
+    // Upload directly to Cloudinary after checking the signed-in Firebase admin.
     const finalItems = await Promise.all(
       initialList.map(async (img) => {
         if (img.status === 'uploading' && img.file) {
@@ -173,7 +173,7 @@ export const CloudinaryImageUploader: React.FC<CloudinaryImageUploaderProps> = (
             Product Images (Cloudinary)
           </label>
           <p className="text-[11px] text-slate-500">
-            Uploaded securely through the API server. First or starred photo serves as the cover image.
+            Uploaded directly to Cloudinary. First or starred photo serves as the cover image.
           </p>
         </div>
         <span className="text-[11px] font-medium text-slate-400">
@@ -221,7 +221,7 @@ export const CloudinaryImageUploader: React.FC<CloudinaryImageUploaderProps> = (
               Click to browse or drag and drop product photos here
             </p>
             <p className="text-[11px] text-slate-400 mt-0.5">
-              JPG, PNG, WEBP, or AVIF (Up to {maxSizeMB}MB each) &bull; Uploaded via API server
+              JPG, PNG, WEBP, or AVIF (Up to {maxSizeMB}MB each) &bull; Direct Cloudinary upload
             </p>
           </div>
         </div>

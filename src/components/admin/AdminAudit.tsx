@@ -20,7 +20,7 @@ export const AdminAudit: React.FC = () => {
       const orders = ordRes.orders || [];
       const products = prodRes.products || [];
 
-      // Derive real stock ledger entries from backend order fulfillments
+      // Estimate movement history from orders; client-side checkout does not reserve stock.
       const derivedMovements: InventoryMovement[] = [];
       orders.forEach((o) => {
         (o.items || []).forEach((item, idx) => {
@@ -91,7 +91,7 @@ export const AdminAudit: React.FC = () => {
             Stock Ledger & Audit Trail
           </h2>
           <p className="text-xs text-slate-500">
-            Activity stream derived from real-time /api/v1/orders and /api/v1/products events.
+            Activity stream derived from Firebase order and product records.
           </p>
         </div>
 
@@ -107,7 +107,7 @@ export const AdminAudit: React.FC = () => {
       <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-xl flex items-start gap-2 text-xs text-amber-900">
         <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
         <p className="text-[11px] leading-relaxed">
-          Ledger and audit trails are dynamically compiled from backend order fulfillment transitions and product catalog records. If your backend exposes a dedicated <code className="bg-amber-100/80 px-1 py-0.5 rounded font-mono">/api/v1/audit</code> endpoint in the future, it will automatically connect.
+          These entries are derived from Firebase order history and current product records; they are not an authoritative inventory ledger. Client-side checkout does not automatically reserve or decrement stock.
         </p>
       </div>
 
@@ -133,7 +133,7 @@ export const AdminAudit: React.FC = () => {
       </div>
 
       {isLoading ? (
-        <div className="py-12 text-center text-xs text-slate-500">Loading records from backend...</div>
+        <div className="py-12 text-center text-xs text-slate-500">Loading records from Firebase...</div>
       ) : activeTab === 'inventory' ? (
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-2xs overflow-hidden">
           {movements.length === 0 ? (

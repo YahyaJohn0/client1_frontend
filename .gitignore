@@ -11,3 +11,6 @@ data/uploads/
 # Provision it on a persistent volume; never commit it.
 data/store.json
 data/store.backup.json
+*firebase-adminsdk*.json
+service-account*.json
+*-service-account*.json

@@ -17,8 +17,10 @@ import {
   type Auth,
   type User
 } from 'firebase/auth';
-import { equalTo, get, getDatabase, orderByChild, query, ref } from 'firebase/database';
+import { getDatabase } from 'firebase/database';
+import { getFirestore } from 'firebase/firestore';
 import type { Product } from '../types/store.ts';
+import { getMongoProducts } from './mongoProductsClient.ts';
 
 const firebaseConfig = {
   apiKey: import.meta.env.FIREBASE_API_KEY || '',
@@ -42,63 +44,14 @@ function existingApp(name: string) {
 
 export const app = existingApp(DEFAULT_APP_NAME) || initializeApp(firebaseConfig);
 export const auth = getAuth(app);
+export const firestore = getFirestore(app);
+export const database = getDatabase(app);
 
 export const adminApp = existingApp(ADMIN_APP_NAME) || initializeApp(firebaseConfig, ADMIN_APP_NAME);
 export const adminAuth = getAuth(adminApp);
 
-/**
- * Loads active demo products directly from Realtime Database so public catalog
- * reads do not depend on the separately hosted API.
- */
-export async function getPublishedDemoProducts(): Promise<Product[]> {
-  if (!firebaseConfig.apiKey || !firebaseConfig.projectId || !firebaseConfig.databaseURL) {
-    throw new Error(
-      'Realtime Database catalog requires FIREBASE_API_KEY, FIREBASE_PROJECT_ID, and FIREBASE_DATABASE_URL in the frontend build environment.'
-    );
-  }
-
-  const productsQuery = query(
-    ref(getDatabase(app), 'demoProducts'),
-    orderByChild('isActive'),
-    equalTo(true)
-  );
-  const snapshot = await get(productsQuery);
-  const products: Product[] = [];
-
-  snapshot.forEach(productSnapshot => {
-    const raw = productSnapshot.val() as Record<string, unknown> | null;
-    if (!raw || raw.isActive !== true) return;
-
-    const rawImages: unknown[] = Array.isArray(raw.images)
-      ? raw.images
-      : typeof raw.imageUrl === 'string' ? [raw.imageUrl] : [];
-    const images = rawImages.flatMap(image => {
-      if (typeof image === 'string') return [image];
-      if (image && typeof image === 'object' && 'url' in image && typeof image.url === 'string') {
-        return [image.url];
-      }
-      return [];
-    });
-    const imageMetadata = Array.isArray(raw.imageMetadata)
-      ? raw.imageMetadata.filter((image): image is { url: string; publicId?: string } =>
-          Boolean(image && typeof image === 'object' && 'url' in image && typeof image.url === 'string')
-        )
-      : rawImages
-          .filter((image): image is { url: string; publicId?: string } =>
-            Boolean(image && typeof image === 'object' && 'url' in image && typeof image.url === 'string')
-          )
-          .map((image, index) => ({ ...image, isPrimary: index === 0 }));
-
-    products.push({
-      ...raw,
-      id: productSnapshot.key ?? String(raw.id ?? ''),
-      images,
-      imageMetadata,
-      salePrice: raw.salePrice ?? undefined
-    } as Product);
-  });
-
-  return products;
+export async function getPublishedProducts(): Promise<Product[]> {
+  return getMongoProducts();
 }
 
 const googleProvider = new GoogleAuthProvider();

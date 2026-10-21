@@ -34,7 +34,7 @@ export const AdminCategories: React.FC = () => {
       setProducts(pRes.products);
     } catch (err: any) {
       console.error('[Admin Categories Load Error]', err);
-      showToast(err.message || 'Failed to load categories from backend', 'error');
+      showToast(err.message || 'Failed to load categories from Firebase', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -69,7 +69,7 @@ export const AdminCategories: React.FC = () => {
     });
     setIsModalOpen(true);
 
-    // Fetch fresh category details from GET /api/v1/categories/:id
+    // Refresh category details from Firebase before editing.
     try {
       const res = await api.getCategory(c.id);
       if (res.category) {
@@ -82,7 +82,7 @@ export const AdminCategories: React.FC = () => {
         });
       }
     } catch (err) {
-      console.warn('Could not refresh category details from /api/v1/categories/:id:', err);
+      console.warn('Could not refresh category details from Firebase:', err);
     }
   };
 
@@ -106,10 +106,8 @@ export const AdminCategories: React.FC = () => {
       };
 
       if (editingCategory) {
-        // PATCH /api/v1/categories/:id
         await api.updateCategory(editingCategory.id, payload);
       } else {
-        // POST /api/v1/categories
         await api.createCategory(payload);
       }
 
@@ -137,7 +135,6 @@ export const AdminCategories: React.FC = () => {
   const confirmDeleteCategory = async () => {
     if (!categoryToDelete) return;
     try {
-      // DELETE /api/v1/categories/:id
       await api.deleteCategory(categoryToDelete.id);
       await loadData();
       await refreshProducts();
@@ -156,7 +153,7 @@ export const AdminCategories: React.FC = () => {
             Category Management ({categories.length})
           </h2>
           <p className="text-xs text-slate-500">
-            Manage product collections directly synchronized with backend database (/api/v1/categories).
+            Manage product collections directly in Firebase.
           </p>
         </div>
 
@@ -192,7 +189,7 @@ export const AdminCategories: React.FC = () => {
         {isLoading ? (
           <div className="p-12 text-center text-xs text-slate-400">
             <RefreshCw className="w-5 h-5 animate-spin mx-auto text-amber-600 mb-2" />
-            Loading categories from backend...
+            Loading categories from Firebase...
           </div>
         ) : categories.length === 0 ? (
           <div className="p-12 text-center text-xs text-slate-500 space-y-2">
@@ -239,14 +236,14 @@ export const AdminCategories: React.FC = () => {
                         <button
                           onClick={() => openEdit(cat)}
                           className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
-                          title="Edit Category (PATCH /api/v1/categories/:id)"
+                          title="Edit category"
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={() => initiateDelete(cat)}
                           className="p-1.5 rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition-colors cursor-pointer"
-                          title="Delete Category (DELETE /api/v1/categories/:id)"
+                          title="Delete category"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -368,7 +365,7 @@ export const AdminCategories: React.FC = () => {
               Delete Category &ldquo;{categoryToDelete.name}&rdquo;?
             </h3>
             <p className="text-xs text-slate-500">
-              This category currently has 0 assigned products and can be safely deleted via DELETE /api/v1/categories/:id. This cannot be undone.
+              This category has no assigned products and can be deleted. This cannot be undone.
             </p>
             <div className="flex gap-2 pt-2">
               <button

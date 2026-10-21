@@ -1,16 +1,32 @@
-import React from 'react';
-import { ArrowRight, Sparkles, ShieldCheck, Truck, RefreshCw, Star, Heart } from 'lucide-react';
+import React, { useState } from 'react';
+import { ArrowRight, Sparkles, ShieldCheck, Truck, RefreshCw, Star, Heart, Mail } from 'lucide-react';
 import { useStore } from '../context/StoreContext.tsx';
 import { HeroBanner } from './HeroBanner.tsx';
 import { CategoryScroller } from './CategoryScroller.tsx';
 import { ProductCard } from './ProductCard.tsx';
 
 export const HomeView: React.FC = () => {
-  const { products, setActiveTab, setSelectedCategory, settings } = useStore();
+  const { products, catalogError, refreshProducts, setActiveTab, setSelectedCategory, settings } = useStore();
+  const [contactEmail, setContactEmail] = useState('');
+  const [contactMessage, setContactMessage] = useState('');
 
   const featuredProducts = products.filter(p => p.isFeatured).slice(0, 4);
   const bestSellers = products.filter(p => p.isBestSeller).slice(0, 4);
   const newArrivals = products.filter(p => p.isNewArrival).slice(0, 4);
+
+  const handleEmailSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const recipient = settings?.contactEmail || 'ahsanullahyousafzai90@gmail.com';
+    const subject = 'Website inquiry - Zamzam Trade & Company';
+    const body = `${contactMessage.trim()}\n\nReply to: ${contactEmail.trim()}`;
+    const gmailUrl = new URL('https://mail.google.com/mail/');
+    gmailUrl.searchParams.set('view', 'cm');
+    gmailUrl.searchParams.set('fs', '1');
+    gmailUrl.searchParams.set('to', recipient);
+    gmailUrl.searchParams.set('su', subject);
+    gmailUrl.searchParams.set('body', body);
+    window.open(gmailUrl.toString(), '_blank', 'noopener,noreferrer');
+  };
 
   return (
     <div className="pb-24 space-y-8">
@@ -19,6 +35,24 @@ export const HomeView: React.FC = () => {
 
       {/* Categories Horizontal Carousel */}
       <CategoryScroller />
+
+      {catalogError && (
+        <section role="alert" className="max-w-7xl mx-auto px-4 sm:px-6">
+          <div className="p-4 border border-rose-200 bg-rose-50 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-bold text-rose-900">Products could not be loaded</h2>
+              <p className="text-xs text-rose-800 mt-1">{catalogError}</p>
+            </div>
+            <button
+              onClick={() => void refreshProducts()}
+              className="px-4 py-2 bg-slate-900 text-white text-xs font-semibold rounded-xl inline-flex items-center justify-center gap-2 shrink-0"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Retry
+            </button>
+          </div>
+        </section>
+      )}
 
       {/* Featured Curations Grid */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6">
@@ -233,8 +267,36 @@ export const HomeView: React.FC = () => {
             </h4>
             <div className="space-y-1.5 text-xs text-slate-600">
               <p>WhatsApp / Call: <strong className="text-slate-900">{settings?.contactPhone || '03049002888'}</strong></p>
-              <p>Email: <strong className="text-slate-900">{settings?.contactEmail || 'ahsanullahyousafzai90@gmail.com'}</strong></p>
-              <p className="pt-2 text-[11px] text-slate-400">Cash on Delivery Available Nationwide</p>
+              <form onSubmit={handleEmailSubmit} className="pt-2 space-y-2">
+                <label htmlFor="footer-contact-email" className="block font-medium text-slate-700">
+                  Email us
+                </label>
+                <input
+                  id="footer-contact-email"
+                  type="email"
+                  required
+                  value={contactEmail}
+                  onChange={event => setContactEmail(event.target.value)}
+                  placeholder="Your email address"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:border-amber-600 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                />
+                <textarea
+                  required
+                  value={contactMessage}
+                  onChange={event => setContactMessage(event.target.value)}
+                  placeholder="How can we help?"
+                  rows={2}
+                  className="w-full resize-y rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:border-amber-600 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                />
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-slate-700"
+                >
+                  <Mail className="h-3.5 w-3.5" />
+                  Open Gmail to send
+                </button>
+              </form>
+              <p className="pt-1 text-[11px] text-slate-400">Cash on Delivery Available Nationwide</p>
             </div>
           </div>
         </div>

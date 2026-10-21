@@ -39,8 +39,8 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanId = identifier.trim();
-    if (!cleanId || !password) {
-      setError('Please provide both your administrator email/username and password.');
+    if (!cleanId || !password || !cleanId.includes('@')) {
+      setError('Enter your administrator Firebase email and password.');
       return;
     }
 
@@ -50,8 +50,8 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
 
     try {
       if (cleanId.includes('@')) {
-        // Firebase administrator flow. Authentication proves identity only;
-        // the backend separately authorizes the account on /api/admin/me.
+        // Firebase Authentication establishes the identity; the Firestore
+        // administrator allowlist controls access to protected data.
         try {
           await adminSignIn(cleanId, password);
         } catch (fbErr: any) {
@@ -76,13 +76,6 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
         }
       }
 
-      // Non-email identifier: local recovery account. This path is disabled
-      // when ALLOW_LOCAL_ADMIN=false on the server. Clear any administrator
-      // Firebase identity first so it cannot take precedence over the cookie.
-      await adminSignOut().catch(() => undefined);
-      await api.adminLogin(cleanId, password);
-      const identity = await api.adminMe();
-      onLoginSuccess(identity);
     } catch (err: any) {
       console.error('[Admin Login Error]', err?.code || err?.message);
       let message = err?.message || 'Authentication failed. Please verify your credentials.';
@@ -134,8 +127,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
             Admin Access Portal
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Sign in with your administrator account. The server verifies your administrator
-            authorization before granting access.
+            Sign in with your Firebase administrator email account.
           </p>
         </div>
 
@@ -187,7 +179,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">
-              Administrator Email or Username
+              Administrator Email
             </label>
             <div className="relative">
               <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />

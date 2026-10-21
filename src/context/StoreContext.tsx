@@ -6,7 +6,7 @@ import { api } from '../services/api.ts';
 import {
   auth,
   customerSignOut as fbCustomerSignOut,
-  getPublishedDemoProducts
+  getPublishedProducts
 } from '../services/firebase.ts';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 
@@ -21,11 +21,30 @@ export type PendingAuthAction =
   | { type: 'buy_now'; product: Product; quantity: number }
   | { type: 'checkout' };
 
+function categoriesForProducts(products: Product[]): Category[] {
+  const categoryIds = [...new Set(products.map(product => product.categoryId).filter(Boolean))];
+  return categoryIds.map((id, index) => {
+    const name = id
+      .replace(/^cat[-_]/i, '')
+      .replace(/[-_]+/g, ' ')
+      .replace(/\b\w/g, character => character.toUpperCase());
+    return {
+      id,
+      name,
+      slug: id.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+      description: '',
+      displayOrder: index,
+      isActive: true
+    };
+  });
+}
+
 interface StoreContextType {
   products: Product[];
   categories: Category[];
   settings: StoreSettings | null;
   isLoading: boolean;
+  catalogError: string | null;
   refreshProducts: () => Promise<void>;
 
   // Customer Authentication & Account
@@ -102,6 +121,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [categories, setCategories] = useState<Category[]>([]);
   const [settings, setSettings] = useState<StoreSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
 
   // Customer Authentication state
   const [customerUser, setCustomerUser] = useState<User | null>(null);
@@ -217,22 +237,20 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const refreshProducts = async () => {
     setIsLoading(true);
+    setCatalogError(null);
     try {
-      const [prodsRes, catsRes, setsRes] = await Promise.allSettled([
-        getPublishedDemoProducts(),
-        api.getCategories(),
+      const [prodsRes, setsRes] = await Promise.allSettled([
+        getPublishedProducts(),
         api.getSettings()
       ]);
 
       if (prodsRes.status === 'fulfilled') {
         setProducts(prodsRes.value);
+        setCategories(categoriesForProducts(prodsRes.value));
       } else {
-        console.error('Failed to load published products from Firebase Realtime Database:', prodsRes.reason);
-      }
-      if (catsRes.status === 'fulfilled') {
-        setCategories(catsRes.value.categories);
-      } else {
-        console.error('Failed to load categories from the API:', catsRes.reason);
+        const message = prodsRes.reason instanceof Error ? prodsRes.reason.message : 'Could not load products from the product API.';
+        setCatalogError(message);
+        console.error('Failed to load published products from the product API:', prodsRes.reason);
       }
       if (setsRes.status === 'fulfilled') {
         setSettings(setsRes.value.settings);
@@ -404,7 +422,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           timesUsed: 0,
           isActive: true
         });
-        showToast(`Coupon "${res.coupon.code}" applied! You saved Rs. ${res.coupon.amountSaved.toLocaleString()}`, 'success');
+        showToast(`Coupon "${res.coupon.code}" applied! You saved Rs. ${(res.amountSaved ?? 0).toLocaleString()}`, 'success');
         return { success: true, message: 'Coupon applied successfully' };
       }
       return { success: false, message: 'Invalid coupon' };
@@ -448,6 +466,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         categories,
         settings,
         isLoading,
+        catalogError,
         refreshProducts,
         customerUser,
         isCustomerAuthLoading,

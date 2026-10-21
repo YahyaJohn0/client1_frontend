@@ -1,59 +1,100 @@
-# Deployment
+# Storefront and API deployment
 
-## Architecture
+The Vite storefront is static, but the product catalog uses the existing Node
+API. The API connects to Firestore's MongoDB-compatible endpoint using a private
+`FIRESTORE_URL`; the browser never receives that URL or its credentials. Other
+Firebase-backed features continue to use Firebase Authentication and Firestore.
+Product images upload directly to Cloudinary using the configured unsigned
+preset.
 
-| Component | Directory | Deployment |
-| --- | --- | --- |
-| Vite storefront build | `client_frontend/` | Netlify static site |
-| Storefront Express API/admin server | `client_frontend/server.ts` | Long-running Node.js host with a persistent disk |
-| Optional Firebase/Firestore API | `client_backend/` | Separate Node.js service; it has a different API contract and is not a drop-in server for the storefront |
+## Configure the backend
 
-Netlify can serve the storefront's static Vite bundle; it does not run either Express server as a permanent service. Configure the build settings below in the Netlify site dashboard; this repository does not include a Netlify configuration file.
+1. In `client_backend`, install dependencies and copy `.env.example` to `.env`.
+2. Set `FIRESTORE_URL` to the real connection string from Firestore's MongoDB
+   compatibility page. Keep it in `client_backend/.env` or the backend host's
+   secret manager. Never put it in the frontend `.env`, a `VITE_*` variable, or
+   source control.
+3. Set the existing Firebase server configuration, including
+   `FIREBASE_PROJECT_ID`, `FIREBASE_DATABASE_URL`,
+   `ORDER_TRACKING_HMAC_SECRET`, and `ADMIN_UIDS`. Add the Firebase administrator
+   UID to `ADMIN_UIDS`, separated by commas if there is more than one.
+4. Set `CORS_ORIGINS` to the exact deployed storefront origin(s).
+5. Start the API with `npm run dev` locally or `npm run build && npm start` on a
+   Node.js 22 host. Use that host's secret/environment settings for production;
+   a local `.env` is not deployed with the server.
 
-## Netlify storefront
+The browser admin still signs in through Firebase Authentication. Product
+write endpoints verify the Firebase ID token and require the UID to be in
+`ADMIN_UIDS`. Keep the backend API online for the storefront's catalog reads
+and admin product management.
 
-- Build command: `bun run build`
-- Publish directory: `dist`
-- Node.js: 22
-- Set these public build-time variables for sign-in and product reads: `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_DATABASE_URL`, `FIREBASE_PROJECT_ID`, and `FIREBASE_APP_ID`.
-- The storefront reads published product records directly from Realtime Database at `/demoProducts`, using an `isActive == true` query. Each product must have `isActive: true`; image fields use Cloudinary HTTPS URLs.
-- Configure Realtime Database rules to allow only the public active-product query and deny browser writes. For example, merge this path into the existing rules (do not replace other paths):
-  ```json
-  {
-    "rules": {
-      "demoProducts": {
-        ".indexOn": ["isActive"],
-        ".read": "query.orderByChild == 'isActive' && query.equalTo == true"
-      }
-    }
-  }
-  ```
-  This rule grants only filtered public reads; admin writes continue through Firebase Admin on the authenticated backend. Never enable unrestricted public reads or writes.
-- Set Netlify's `API_BASE_URL` to `https://clientbackend-taxt7mcy.b4a.run`; the frontend appends each API path to this origin, so health checks use `/health/live` and `/health/ready`. Trigger a fresh deployment after changing it.
-- Product listing no longer calls this API. Categories, settings, checkout, orders, and administrator operations still use the API, so this change reduces backend traffic but does not remove the backend dependency for those features. The `client_backend/` service currently exposes a different API contract from `Client1_Frontend/server.ts`; changing the URL alone does not make every storefront or admin operation compatible.
+## Import the supplied product list
 
-Firebase web configuration and a Firebase project ID are public client configuration, not authentication credentials. Vite explicitly embeds only the Firebase web values and `API_BASE_URL`; do not put Firebase service-account JSON/private keys, Cloudinary API secrets/`CLOUDINARY_URL`, administrator passwords, or signing/HMAC secrets in frontend build variables. Firebase Authentication, Realtime Database rules, Firestore rules for private commerce data, and server-side administrator authorization still need to be configured correctly.
+From `client_backend`, after setting a working `FIRESTORE_URL` in its `.env`, run:
 
-Keep Netlify secrets scanning enabled. Do not set `SECRETS_SCAN_ENABLED=false` or omit paths or source directories from scanning.
+```powershell
+npm run seed:products
+```
 
-## Express service
+The importer validates `products.json`, converts each Cloudinary `imageUrl` to
+the product image metadata format, and upserts records by SKU into the
+`products` collection. It is safe to rerun: the 16 `SEED-SK-*` records update
+in place rather than creating duplicates. The import does not delete unrelated
+records. It requires an actual Mongo-compatible Firestore username and
+password; the placeholder URI in `.env.example` is not usable.
 
-Deploy `client_frontend/` to a long-running Node.js host that supports a persistent volume. It stores products, orders, administrator state, and local uploads in its JSON datastore and uses in-memory sessions/rate limits; do not scale it across multiple instances without replacing those storage components. Set `NODE_ENV=production`, the host-assigned `PORT`, `TRUST_PROXY=1` behind a trusted proxy, and a persistent `ZAMZAM_DATA_DIR` (plus `ZAMZAM_UPLOADS_DIR` if needed).
+## Configure the frontend
 
-Configure the server-side `FIREBASE_PROJECT_ID` for ID-token verification and `ADMIN_UIDS` or trusted Firebase admin claims for authorization. `FIREBASE_PROJECT_ID` is also used by the browser as public configuration. If Firestore mirroring is enabled, configure `FIREBASE_API_KEY` and the other `FIREBASE_*` client settings needed by that server integration. The API currently permits cross-origin browser requests from all origins (without credentialed cookies); authorization must still be enforced by each API route. Set `CORS_ORIGINS` to exact additional origins only if you later remove the wildcard.
+Set these public build variables:
 
-For Cloudinary uploads, configure `CLOUDINARY_URL` as a server-side credential. The public cloud name and optional upload-preset name use `CLOUDINARY_CLOUD_NAME` and `CLOUDINARY_UPLOAD_PRESET`. The app sends uploads to the server; the Cloudinary API secret is never needed in the browser.
+- `API_BASE_URL`: backend origin, for example
+  `https://your-api.example.com` (or `http://localhost:8080` locally).
+- `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_DATABASE_URL`,
+  `FIREBASE_PROJECT_ID`, and `FIREBASE_APP_ID`.
+- `CLOUDINARY_CLOUD_NAME` and `CLOUDINARY_UPLOAD_PRESET`.
 
-## Optional Firebase backend service
+`API_BASE_URL` is a public API address, not a secret. Never place
+`FIRESTORE_URL`, a Firebase service-account key, or a Cloudinary API secret in
+the frontend environment. Rebuild the frontend after changing build variables.
+The backend uses `FIRESTORE_URL` to connect to the Firestore
+MongoDB-compatible endpoint and store product documents in the `products`
+collection. The Firebase web SDK still uses the Firebase project configuration
+for authentication and other Firebase-backed features.
 
-`client_backend/` is a standalone Firebase Admin/Firestore API with a different endpoint and authorization model. Deploy it to Vercel only if the frontend has been deliberately integrated with its API; its admin endpoints do not replace the storefront's `/api/admin/*` interface. Configure `FIREBASE_PROJECT_ID`, `FIREBASE_SERVICE_ACCOUNT`, exact `CORS_ORIGINS`, and a unique random `ORDER_TRACKING_HMAC_SECRET` in the Vercel project's environment variables. Configure private Cloudinary credentials there only when signed uploads are enabled. See [`client_backend/README.md`](./client_backend/README.md) for deployment steps and the complete variable list.
+## Firebase and Cloudinary
 
-## Secrets-scanning findings
+Deploy `database.rules.json` as Realtime Database rules and `firestore.rules` as
+Firestore rules. Review and merge them with existing rules before deployment.
+Create a Firestore document `admins/{FIREBASE_UID}` with
+`{ "enabled": true }` and a Realtime Database entry `/admins/{FIREBASE_UID}`
+with value `true`; use the same UID in backend `ADMIN_UIDS`.
 
-The reported `LOG_LEVEL`, `NODE_ENV`, and `PORT` values are ordinary runtime configuration. `FIREBASE_PROJECT_ID` is a public identifier, not a password. `CLOUDINARY_UPLOAD_PRESET` is a public preset name; the optional Firebase backend signs uploads server-side. The backend Git repository ignores its service-account JSON and `.env`. A populated local `.env` contains a Cloudinary credential URL and order-tracking HMAC secret; these were not found in tracked source or the generated bundle. Rotate those values and the service-account key if they have ever been committed, shared, or deployed to an untrusted location.
+Configure the Cloudinary unsigned preset with strict file type and size
+restrictions. Unsigned uploads are public, and the browser cannot securely
+delete Cloudinary assets.
 
-## Release checks
+## Browser-only checkout tradeoffs
 
-Configure the public client variables in Netlify and the private runtime variables in Vercel, then test `/health/ready`, Firebase sign-in/admin authorization, product image uploads, and persistent writes. No Netlify or Vercel deployment is performed by these repository changes.
+Checkout still submits orders through the Firebase client SDK. A modified
+browser can submit altered prices; coupon usage limits are not authoritative,
+and orders do not reserve inventory. Use trusted server-side checkout logic if
+you need server-authoritative pricing, coupon use, or inventory reservation.
 
-The current workspace has no Git root: `client_backend/` is a separate Git checkout, while `Client1_Frontend/` is outside it. To deploy the storefront from Git, connect a repository containing this frontend and configure the build settings in the Netlify site dashboard; the backend-only Git checkout cannot build that storefront.
+## Local development
+
+Run the API and frontend in separate terminals:
+
+```powershell
+# Terminal 1
+Set-Location .\client_backend
+npm install
+npm run dev
+
+# Terminal 2
+Set-Location .\Client1_Frontend
+npm install
+npm run dev
+```
+
+Set `API_BASE_URL=http://localhost:8080` in the frontend `.env`, along
+with the public Firebase and Cloudinary variables.

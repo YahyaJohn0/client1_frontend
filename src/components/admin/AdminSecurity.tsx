@@ -126,7 +126,7 @@ export const AdminSecurity: React.FC<AdminSecurityProps> = ({
     try {
       if (admin.provider === 'firebase') {
         // Firebase owns this password: re-authenticate and update it entirely
-        // in the SDK. The password never reaches the Zamzam API server.
+        // in the SDK. The password is never sent to an application server.
         await reauthenticateAdmin(currentPassword);
         await updateAdminPassword(newPassword);
       } else {

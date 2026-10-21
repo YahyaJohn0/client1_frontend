@@ -14,6 +14,8 @@ export default defineConfig(({ mode }) => {
       'import.meta.env.FIREBASE_DATABASE_URL': JSON.stringify(env.FIREBASE_DATABASE_URL || ''),
       'import.meta.env.FIREBASE_PROJECT_ID': JSON.stringify(env.FIREBASE_PROJECT_ID || ''),
       'import.meta.env.FIREBASE_APP_ID': JSON.stringify(env.FIREBASE_APP_ID || ''),
+      'import.meta.env.CLOUDINARY_CLOUD_NAME': JSON.stringify(env.CLOUDINARY_CLOUD_NAME || ''),
+      'import.meta.env.CLOUDINARY_UPLOAD_PRESET': JSON.stringify(env.CLOUDINARY_UPLOAD_PRESET || ''),
       'import.meta.env.API_BASE_URL': JSON.stringify(env.API_BASE_URL || '')
     },
     resolve: {
