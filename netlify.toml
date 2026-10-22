@@ -3,8 +3,9 @@
   publish = "dist"
 
 [build.environment]
-  # Omit these env var KEYS from secrets scanning (values are not sensitive)
-  SECRETS_SCAN_OMIT_KEYS = "NODE_ENV,NODE_VERSION,PORT,TRUST_PROXY,ALLOW_LOCAL_ADMIN,API_BASE_URL,LOG_LEVEL,CLOUDINARY_UPLOAD_PRESET"
+  # Non-sensitive config values that Netlify's scanner matches against
+  # committed files (.env.example, README.md, Dockerfile, etc.).
+  SECRETS_SCAN_OMIT_KEYS = "NODE_ENV,NODE_VERSION,PORT,TRUST_PROXY,ALLOW_LOCAL_ADMIN,API_BASE_URL,LOG_LEVEL,CLOUDINARY_UPLOAD_PRESET,CORS_ORIGINS"
 
 [[redirects]]
   from = "/*"
