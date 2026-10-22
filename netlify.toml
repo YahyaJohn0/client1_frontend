@@ -1,9 +1,10 @@
-[build.environment]
-  NODE_VERSION = "22"
-
 [build]
   command = "bun run build"
   publish = "dist"
+
+[build.environment]
+  # Omit these env var KEYS from secrets scanning (values are not sensitive)
+  SECRETS_SCAN_OMIT_KEYS = "NODE_ENV,NODE_VERSION,PORT,TRUST_PROXY,ALLOW_LOCAL_ADMIN,API_BASE_URL,LOG_LEVEL,CLOUDINARY_UPLOAD_PRESET"
 
 [[redirects]]
   from = "/*"
